@@ -158,7 +158,7 @@ function NoteIcon({ dur, color = '#f0a830', size = 16 }) {
 // ============================================================================
 const SONGS = [
   {
-    id: 'twinkle', title: 'Brilha Brilha Estrelinha', artist: 'Tradicional', difficulty: 1, bpm: 90,
+    id: 'twinkle', title: 'Brilha Brilha Estrelinha', artist: 'Tradicional', difficulty: 1, bpm: 90, timeSignature: '4/4',
     notes: [
       ['C4',1],['C4',1],['G4',1],['G4',1],['A4',1],['A4',1],['G4',2],
       ['F4',1],['F4',1],['E4',1],['E4',1],['D4',1],['D4',1],['C4',2],
@@ -176,7 +176,7 @@ const SONGS = [
     ]
   },
   {
-    id: 'birthday', title: 'Parabéns pra Você', artist: 'Tradicional', difficulty: 1, bpm: 100,
+    id: 'birthday', title: 'Parabéns pra Você', artist: 'Tradicional', difficulty: 1, bpm: 100, timeSignature: '3/4',
     notes: [
       ['G4',0.75],['G4',0.25],['A4',1],['G4',1],['C5',1],['B4',2],
       ['G4',0.75],['G4',0.25],['A4',1],['G4',1],['D5',1],['C5',2],
@@ -190,7 +190,7 @@ const SONGS = [
     ]
   },
   {
-    id: 'ode', title: 'Hino da Alegria', artist: 'Beethoven', difficulty: 1, bpm: 85,
+    id: 'ode', title: 'Hino da Alegria', artist: 'Beethoven', difficulty: 1, bpm: 85, timeSignature: '4/4',
     notes: [
       // frase 1
       ['E4',1],['E4',1],['F4',1],['G4',1],
@@ -215,7 +215,7 @@ const SONGS = [
     ]
   },
   {
-    id: 'jingle', title: 'Jingle Bells', artist: 'Tradicional', difficulty: 1, bpm: 110,
+    id: 'jingle', title: 'Jingle Bells', artist: 'Tradicional', difficulty: 1, bpm: 110, timeSignature: '4/4',
     notes: [
       ['E4',1],['E4',1],['E4',2],
       ['E4',1],['E4',1],['E4',2],
@@ -233,7 +233,7 @@ const SONGS = [
     ]
   },
   {
-    id: 'mary', title: 'Mary Tinha um Carneirinho', artist: 'Tradicional', difficulty: 1, bpm: 90,
+    id: 'mary', title: 'Mary Tinha um Carneirinho', artist: 'Tradicional', difficulty: 1, bpm: 90, timeSignature: '4/4',
     notes: [
       ['E4',1],['D4',1],['C4',1],['D4',1],
       ['E4',1],['E4',1],['E4',2],
@@ -255,7 +255,7 @@ const SONGS = [
     ]
   },
   {
-    id: 'asabranca', title: 'Asa Branca', artist: 'Luiz Gonzaga', difficulty: 2, bpm: 80,
+    id: 'asabranca', title: 'Asa Branca', artist: 'Luiz Gonzaga', difficulty: 2, bpm: 80, timeSignature: '4/4',
     notes: [
       ['G4',0.5],['C5',1],['E5',0.5],['C5',0.5],['E5',1],
       ['D5',0.5],['C5',1],['B4',0.5],['C5',1],
@@ -271,7 +271,7 @@ const SONGS = [
     ]
   },
   {
-    id: 'elise', title: 'Para Elisa', artist: 'Beethoven', difficulty: 2, bpm: 56,
+    id: 'elise', title: 'Para Elisa', artist: 'Beethoven', difficulty: 2, bpm: 56, timeSignature: '3/8',
     notes: [
       // tema A
       ['E5',0.5],['D#5',0.5],['E5',0.5],['D#5',0.5],['E5',0.5],['B4',0.5],['D5',0.5],['C5',0.5],['A4',1.5],['C4',0.5],['E4',0.5],['A4',0.5],
@@ -292,7 +292,7 @@ const SONGS = [
     ]
   },
   {
-    id: 'cai_cai', title: 'Cai Cai Balão', artist: 'Tradicional', difficulty: 1, bpm: 90,
+    id: 'cai_cai', title: 'Cai Cai Balão', artist: 'Tradicional', difficulty: 1, bpm: 90, timeSignature: '4/4',
     notes: [
       ['G4',1],['E4',1],['E4',2],['F4',1],['D4',1],['D4',2],
       ['C4',1],['E4',1],['G4',2],['G4',1],['E4',1],['E4',2],
@@ -303,7 +303,7 @@ const SONGS = [
     ]
   },
   {
-    id: 'atirei_pau', title: 'Atirei o Pau no Gato', artist: 'Tradicional', difficulty: 1, bpm: 90,
+    id: 'atirei_pau', title: 'Atirei o Pau no Gato', artist: 'Tradicional', difficulty: 1, bpm: 90, timeSignature: '4/4',
     notes: [
       ['C4',1],['C4',1],['G4',1],['G4',1],['G4',1],['A4',1],['A4',1],['G4',2],
       ['F4',1],['F4',1],['E4',1],['E4',1],['D4',1],['D4',1],['C4',2],
@@ -314,7 +314,7 @@ const SONGS = [
     ]
   },
   {
-    id: 'ciranda', title: 'Ciranda Cirandinha', artist: 'Tradicional', difficulty: 1, bpm: 85,
+    id: 'ciranda', title: 'Ciranda Cirandinha', artist: 'Tradicional', difficulty: 1, bpm: 85, timeSignature: '4/4',
     notes: [
       ['C4',1],['D4',1],['E4',1],['F4',1],['G4',1],['G4',1],['G4',2],
       ['A4',1],['G4',1],['F4',1],['E4',1],['D4',2],
@@ -327,7 +327,7 @@ const SONGS = [
   },
   // ---- Músicas novas ----
   {
-    id: 'greensleeves', title: 'Greensleeves', artist: 'Tradicional Inglês', difficulty: 2, bpm: 72,
+    id: 'greensleeves', title: 'Greensleeves', artist: 'Tradicional Inglês', difficulty: 2, bpm: 72, timeSignature: '3/4',
     notes: [
       // 3/4: 1=semínima, 0.5=colcheia, 1.5=semínima com ponto
       ['A4',1],['C5',1],['D5',0.5],
@@ -353,7 +353,7 @@ const SONGS = [
     ]
   },
   {
-    id: 'amazing_grace', title: 'Amazing Grace', artist: 'John Newton', difficulty: 1, bpm: 65,
+    id: 'amazing_grace', title: 'Amazing Grace', artist: 'John Newton', difficulty: 1, bpm: 65, timeSignature: '3/4',
     notes: [
       // 3/4
       ['G4',1],
@@ -378,7 +378,7 @@ const SONGS = [
     ]
   },
   {
-    id: 'canon', title: 'Cânone em Ré', artist: 'Pachelbel', difficulty: 3, bpm: 72,
+    id: 'canon', title: 'Cânone em Ré', artist: 'Pachelbel', difficulty: 3, bpm: 72, timeSignature: '4/4',
     notes: [
       // 4/4, semicolcheias agrupadas, 1 beat = semínima
       ['F#5',0.5],['E5',0.5],['D5',0.5],['C#5',0.5],['B4',0.5],['A4',0.5],['B4',0.5],['C#5',0.5],
@@ -392,7 +392,7 @@ const SONGS = [
     ]
   },
   {
-    id: 'river_flows', title: 'River Flows in You', artist: 'Yiruma', difficulty: 3, bpm: 66,
+    id: 'river_flows', title: 'River Flows in You', artist: 'Yiruma', difficulty: 3, bpm: 66, timeSignature: '4/4',
     notes: [
       // melodia principal: colcheias e semínimas
       ['A4',0.5],['B4',0.5],['C#5',0.5],['D5',0.5],['E5',1],['D5',0.5],['C#5',0.5],
@@ -409,7 +409,7 @@ const SONGS = [
     ]
   },
   {
-    id: 'bella_ciao', title: 'Bella Ciao', artist: 'Tradicional Italiano', difficulty: 2, bpm: 96,
+    id: 'bella_ciao', title: 'Bella Ciao', artist: 'Tradicional Italiano', difficulty: 2, bpm: 96, timeSignature: '3/4',
     notes: [
       // 3/4
       ['A4',0.5],
@@ -433,7 +433,7 @@ const SONGS = [
     ]
   },
   {
-    id: 'moonlight', title: 'Sonata ao Luar', artist: 'Beethoven', difficulty: 3, bpm: 54,
+    id: 'moonlight', title: 'Sonata ao Luar', artist: 'Beethoven', difficulty: 3, bpm: 54, timeSignature: '4/4',
     notes: [
       // arpejos em tercinas: 3 notas por tempo (simplificado como colcheias)
       // compassos 1–4: Am
@@ -454,7 +454,7 @@ const SONGS = [
     ]
   },
   {
-    id: 'scarborough', title: 'Scarborough Fair', artist: 'Tradicional Inglês', difficulty: 2, bpm: 68,
+    id: 'scarborough', title: 'Scarborough Fair', artist: 'Tradicional Inglês', difficulty: 2, bpm: 68, timeSignature: '3/4',
     notes: [
       // 3/4
       ['A4',1],['C5',0.5],
@@ -479,7 +479,7 @@ const SONGS = [
     ]
   },
   {
-    id: 'fur_elise_full', title: 'Para Elisa (Completa)', artist: 'Beethoven', difficulty: 3, bpm: 52,
+    id: 'fur_elise_full', title: 'Para Elisa (Completa)', artist: 'Beethoven', difficulty: 3, bpm: 52, timeSignature: '3/8',
     notes: [
       // --- A ---
       ['E5',0.5],['D#5',0.5],['E5',0.5],['D#5',0.5],['E5',0.5],['B4',0.5],['D5',0.5],['C5',0.5],
@@ -1561,7 +1561,12 @@ export default function PianoMidi() {
                 <ChevronRight size={18} style={{ color:'#f0a830' }} className="group-hover:translate-x-1 transition-transform"/>
               </div>
               <div className="display-font text-2xl leading-tight mb-1" style={{ color:'#f5efe6' }}>{currentSong ? currentSong.title : 'Escolher música'}</div>
-              <div className="text-xs" style={{ color:'#a89a87' }}>{currentSong ? `${currentSong.artist} · clique para trocar` : `${SONGS.length} músicas disponíveis`}</div>
+              <div className="text-xs flex items-center gap-2 flex-wrap" style={{ color:'#a89a87' }}>
+                <span>{currentSong ? `${currentSong.artist} · clique para trocar` : `${SONGS.length} músicas disponíveis`}</span>
+                {currentSong?.timeSignature && (
+                  <span className="display-font" style={{ fontSize:11, color:'#f0a830', background:'rgba(240,168,48,.1)', border:'1px solid rgba(240,168,48,.2)', borderRadius:4, padding:'1px 6px' }}>{currentSong.timeSignature}</span>
+                )}
+              </div>
             </button>
           </div>
         </section>
@@ -1576,8 +1581,11 @@ export default function PianoMidi() {
                     {trainingMode ? '🎮 Modo Treino' : sheetMode ? '🎼 Partitura' : (songComplete ? '✦ Completa' : 'Aprendendo')}
                   </div>
                   <div className="display-font text-2xl md:text-3xl" style={{ color:'#f5efe6' }}>{currentSong.title}</div>
-                  <div className="text-xs mt-1" style={{ color:'#8a7d6c' }}>
-                    {currentSong.artist} · {parsedSongNotes.length} notas · ~{Math.round(songBeats(currentSong) / (currentSong.bpm/60))}s
+                  <div className="text-xs mt-1 flex items-center gap-2 flex-wrap" style={{ color:'#8a7d6c' }}>
+                    <span>{currentSong.artist} · {parsedSongNotes.length} notas · ~{Math.round(songBeats(currentSong) / (currentSong.bpm/60))}s</span>
+                    {currentSong.timeSignature && (
+                      <span className="display-font" style={{ fontSize:11, color:'#f0a830', background:'rgba(240,168,48,.1)', border:'1px solid rgba(240,168,48,.2)', borderRadius:4, padding:'1px 6px' }}>{currentSong.timeSignature}</span>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
@@ -2115,6 +2123,9 @@ export default function PianoMidi() {
                       <div className="text-xs mt-0.5" style={{ color:'#8a7d6c' }}>{song.artist} · {song.notes.length} notas · ~{secs}s</div>
                     </div>
                     <div className="flex items-center gap-3">
+                      {song.timeSignature && (
+                        <span className="display-font" style={{ fontSize:11, color:'#f0a830', background:'rgba(240,168,48,.1)', border:'1px solid rgba(240,168,48,.2)', borderRadius:4, padding:'1px 6px', letterSpacing:0 }}>{song.timeSignature}</span>
+                      )}
                       <div className="flex gap-0.5">{[1,2,3].map(l => <div key={l} className="w-1.5 h-1.5 rounded-full" style={{ background:l<=song.difficulty?'#f0a830':'rgba(255,255,255,.1)' }}/>)}</div>
                       <ChevronRight size={16} style={{ color:'#8a7d6c' }} className="group-hover:translate-x-1 transition-transform"/>
                     </div>
