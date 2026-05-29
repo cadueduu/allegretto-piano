@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx vite *)",
+      "Bash(sleep 4 && cat /c/Users/user/AppData/Local/Temp/claude/C--Users-user-Downloads-allegretto-piano-allegretto-piano/bc9d60fd-da18-419d-ab69-c086470dedfd/tasks/b8qfvbgxh.output)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5174/)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(curl -s http://localhost:5174/)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :5174)",
+      "Bash(taskkill /F /PID 11500)",
+      "PowerShell(Stop-Process -Id 11500 -Force)",
+      "PowerShell(\"stopped\")",
+      "Bash(powershell -Command \"Get-ChildItem -Path 'C:\\\\Users\\\\user\\\\Downloads\\\\allegretto-piano\\\\allegretto-piano' -Recurse -Force | Format-Table FullName\")",
+      "Bash(npm install *)",
+      "Bash(gh auth *)",
+      "Bash(where gh *)",
+      "PowerShell(gh auth status 2>&1)",
+      "PowerShell($env:PATH = $env:PATH + \";C:\\\\Program Files\\\\GitHub CLI\"; gh --version)",
+      "Bash(sleep 4 && cat \"/c/Users/user/AppData/Local/Temp/claude/C--Users-user-Downloads-allegretto-piano-allegretto-piano/c6b75664-8a91-46bb-83fc-554941184695/tasks/bjm2fd43g.output\")"
+    ]
+  }
+}
