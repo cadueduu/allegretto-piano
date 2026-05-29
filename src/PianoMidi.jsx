@@ -2332,11 +2332,12 @@ export default function PianoMidi() {
                   const ledger1Above = ST - SL;
                   const ledger2Above = ST - SL*2;
                   const totalBeats = composerNotes.reduce((s, n) => s + n.dur, 0);
-                  const svgW = Math.max(560, LEFT + totalBeats * PX + 80);
                   const noteEls = [];
                   let cum = 0;
+                  let gapAcc = 0;        // px accumulated from bar-line padding
+                  const BARLINE_PAD = 20; // extra px inserted at each bar line
                   composerNotes.forEach((note, i) => {
-                    const nx  = LEFT + cum * PX;
+                    const nx  = LEFT + cum * PX + gapAcc;
                     const isPlay = composerPlayIdx === i;
                     const isRest = note.name === 'rest';
                     const clr = isPlay ? '#f0a830' : '#e8dfd0';
@@ -2398,10 +2399,13 @@ export default function PianoMidi() {
                     }
                     cum += dur;
                     if (Math.abs(cum % beatsPerMeasure) < 0.01 && i < composerNotes.length - 1) {
-                      const bx = LEFT + cum * PX;
-                      noteEls.push(<line key={`bl-${i}`} x1={bx} y1={ST-4} x2={bx} y2={ST+SL*4+4} stroke="rgba(255,255,255,0.28)" strokeWidth="1.5"/>);
+                      // Bar line sits 8px after the beat boundary, leaving ~12px before the next note
+                      const bx = LEFT + cum * PX + gapAcc + 8;
+                      noteEls.push(<line key={`bl-${i}`} x1={bx} y1={ST-4} x2={bx} y2={ST+SL*4+4} stroke="rgba(255,255,255,0.35)" strokeWidth="1.5"/>);
+                      gapAcc += BARLINE_PAD;
                     }
                   });
+                  const svgW = Math.max(560, LEFT + totalBeats * PX + gapAcc + 80);
                   return (
                     <svg width={svgW} height={STAFF_SVG_H+8} style={{ display:'block' }}>
                       {lineYs.map((y, idx) => (
