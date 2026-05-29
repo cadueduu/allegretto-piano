@@ -13,6 +13,10 @@ function nameToColor(name) {
   let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) | 0;
   return P[Math.abs(h) % P.length];
 }
+function lightenColor(hex) {
+  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  return `#${Math.min(255,r+75).toString(16).padStart(2,'0')}${Math.min(255,g+75).toString(16).padStart(2,'0')}${Math.min(255,b+75).toString(16).padStart(2,'0')}`;
+}
 
 // ============================================================================
 // TRAINING CONSTANTS
@@ -561,11 +565,15 @@ export default function PianoMidi() {
   const [mpInRoom,  setMpInRoom]  = useState(false);
   const [mpIsHost,  setMpIsHost]  = useState(false);
   const [mpName,    setMpName]    = useState(() => { try { return localStorage.getItem('mp-name') || ''; } catch(e) { return ''; } });
+  const [mpCustomColor, setMpCustomColor] = useState(() => { try { return localStorage.getItem('mp-color') || ''; } catch(e) { return ''; } });
   const [mpCode,    setMpCode]    = useState('');
   const [mpMembers, setMpMembers] = useState([]);  // [{id, name, color, isMe, isHost}]
   const [mpStatus,  setMpStatus]  = useState('');
   const [mpLoading, setMpLoading] = useState(false);
   const [remoteNoteDisplay, setRemoteNoteDisplay] = useState(new Map()); // noteName → [{peerId,color}]
+  const [freeMode,       setFreeMode]       = useState(false);
+  const [keyClickCounts, setKeyClickCounts] = useState(() => new Map());
+  const [freeFloats,     setFreeFloats]     = useState([]); // [{id, noteName}]
 
   // Audio refs
   const synthRef       = useRef(null);
@@ -588,6 +596,9 @@ export default function PianoMidi() {
   const mpMembersRef     = useRef([]);
   const remoteNotesRef   = useRef(new Map()); // noteName → [{peerId, color}]
   const broadcastNoteRef = useRef(null);       // always-fresh broadcast fn
+  const freeModeRef      = useRef(false);
+  const freeModePlayRef  = useRef(null);
+  const freeFloatIdRef   = useRef(0);
 
   // Lesson refs
   const currentSongRef      = useRef(null);
@@ -667,6 +678,7 @@ export default function PianoMidi() {
     try { synthRef.current?.triggerAttack(noteName); } catch (e) {}
     setActiveNotes(prev => { const s = new Set(prev); s.add(noteName); return s; });
     broadcastNoteRef.current?.(noteName, 'on');
+    freeModePlayRef.current?.(noteName);
 
     // Training mode: check if this press scores a hit
     if (trainingStateRef.current === 'playing') {
@@ -766,6 +778,16 @@ export default function PianoMidi() {
   }, []);
 
   useEffect(() => { releaseNoteRef.current = releaseNote; }, [releaseNote]);
+  useEffect(() => { freeModeRef.current = freeMode; }, [freeMode]);
+  useEffect(() => {
+    freeModePlayRef.current = (noteName) => {
+      if (!freeModeRef.current) return;
+      setKeyClickCounts(prev => { const n = new Map(prev); n.set(noteName, (n.get(noteName)||0)+1); return n; });
+      const id = ++freeFloatIdRef.current;
+      setFreeFloats(prev => [...prev, { id, noteName }]);
+      setTimeout(() => setFreeFloats(prev => prev.filter(f => f.id !== id)), 900);
+    };
+  }); // no deps — always fresh
 
   // ---------------------------------------------------------------
   // MULTIPLAYER (PeerJS peer-to-peer)
@@ -844,6 +866,16 @@ export default function PianoMidi() {
       } else if (msg.type === 'note_off') {
         mpHandleRemoteNote(conn.peer, msg.note, 'off');
         mpBroadcastAll({ type: 'note_off', from: conn.peer, note: msg.note }, conn.peer);
+      } else if (msg.type === 'color_change') {
+        const c = mpConnsRef.current.get(conn.peer);
+        if (c) mpConnsRef.current.set(conn.peer, { ...c, color: msg.color });
+        mpMembersRef.current = mpMembersRef.current.map(m => m.id === conn.peer ? { ...m, color: msg.color } : m);
+        setMpMembers([...mpMembersRef.current]);
+        remoteNotesRef.current.forEach((list, note) => {
+          remoteNotesRef.current.set(note, list.map(x => x.peerId === conn.peer ? { ...x, color: msg.color } : x));
+        });
+        setRemoteNoteDisplay(new Map(remoteNotesRef.current));
+        mpBroadcastAll({ type: 'color_change', from: conn.peer, color: msg.color }, conn.peer);
       }
     });
     conn.on('close', () => {
@@ -872,7 +904,7 @@ export default function PianoMidi() {
       mpHostRef.current  = true;
       mpInRoomRef.current = true;
       setMpIsHost(true); setMpInRoom(true); setMpOpen(false); setMpLoading(false); setMpStatus('');
-      const color = nameToColor(name);
+      const color = mpCustomColor || nameToColor(name);
       mpMeRef.current = { name, color, id };
       const me = { id, name, color, isMe: true, isHost: true };
       mpMembersRef.current = [me];
@@ -885,7 +917,7 @@ export default function PianoMidi() {
       if (err.type === 'unavailable-id') {
         // Host exists — join as client
         peer.destroy(); peerRef.current = null;
-        const color   = nameToColor(name);
+        const color   = mpCustomColor || nameToColor(name);
         const c2      = new Peer({ debug: 0 });
         peerRef.current = c2;
         c2.on('open', (myId) => {
@@ -917,6 +949,14 @@ export default function PianoMidi() {
               mpDestroySynth(msg.id);
             } else if (msg.type === 'note_on')  { mpHandleRemoteNote(msg.from, msg.note, 'on'); }
               else if (msg.type === 'note_off') { mpHandleRemoteNote(msg.from, msg.note, 'off'); }
+              else if (msg.type === 'color_change') {
+                mpMembersRef.current = mpMembersRef.current.map(m => m.id === msg.from ? { ...m, color: msg.color } : m);
+                setMpMembers([...mpMembersRef.current]);
+                remoteNotesRef.current.forEach((list, note) => {
+                  remoteNotesRef.current.set(note, list.map(x => x.peerId === msg.from ? { ...x, color: msg.color } : x));
+                });
+                setRemoteNoteDisplay(new Map(remoteNotesRef.current));
+              }
           });
           conn.on('close', () => { setMpStatus('Host desconectou.'); leaveRoom(); });
           conn.on('error', () => { setMpStatus('Conexão com host perdida.'); setMpLoading(false); });
@@ -926,7 +966,7 @@ export default function PianoMidi() {
         setMpStatus('Erro: ' + (err.message || err.type)); setMpLoading(false);
       }
     });
-  }, [mpName, mpCode, ensureAudio]);
+  }, [mpName, mpCode, mpCustomColor, ensureAudio]);
 
   const leaveRoom = useCallback(() => {
     mpConnsRef.current.forEach(({ conn }) => { try { conn.close(); } catch(e) {} });
@@ -937,6 +977,19 @@ export default function PianoMidi() {
     if (peerRef.current) { try { peerRef.current.destroy(); } catch(e) {} peerRef.current = null; }
     mpInRoomRef.current = false; mpHostRef.current = false; mpMembersRef.current = [];
     setMpInRoom(false); setMpIsHost(false); setMpMembers([]); setMpStatus('');
+  }, []);
+
+  const changeMyColor = useCallback((newColor) => {
+    mpMeRef.current = { ...mpMeRef.current, color: newColor };
+    setMpCustomColor(newColor);
+    try { localStorage.setItem('mp-color', newColor); } catch(e) {}
+    mpMembersRef.current = mpMembersRef.current.map(m => m.isMe ? { ...m, color: newColor } : m);
+    setMpMembers([...mpMembersRef.current]);
+    if (mpHostRef.current) {
+      mpBroadcastAll({ type: 'color_change', from: mpMeRef.current.id, color: newColor });
+    } else {
+      mpConnsRef.current.forEach(({ conn }) => { try { conn.send({ type: 'color_change', color: newColor }); } catch(e) {} });
+    }
   }, []);
 
   // Cleanup on unmount
@@ -1384,6 +1437,8 @@ export default function PianoMidi() {
         .feedback-pop{animation:feedbackPop .65s ease-out forwards;position:absolute;top:18%;left:50%;pointer-events:none;z-index:30;white-space:nowrap;}
         .cd-num{animation:cdPulse .4s ease-out;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);}
         .hz-bar{animation:hzPulse 2s ease-in-out infinite;}
+        @keyframes floatUp{0%{transform:translateX(-50%) translateY(0);opacity:1;}100%{transform:translateX(-50%) translateY(-58px);opacity:0;}}
+        .free-float{animation:floatUp .85s ease-out forwards;position:absolute;left:50%;bottom:105%;pointer-events:none;z-index:30;font-weight:800;white-space:nowrap;}
         button:focus-visible{outline:2px solid #f0a830;outline-offset:3px;}
       `}</style>
 
@@ -1858,18 +1913,27 @@ export default function PianoMidi() {
                   const isActive   = activeNotes.has(note.name);
                   const isExpected = sheetMode ? (sheetExpectedNote===note.name) : (expectedNote===note.name);
                   const remotePressing = remoteNoteDisplay.get(note.name) || [];
+                  const pressColor = (isActive && mpInRoom) ? mpMeRef.current.color : (remotePressing.length > 0 ? remotePressing[0].color : null);
+                  const pressGrad  = pressColor ? `linear-gradient(180deg,${lightenColor(pressColor)},${pressColor})` : null;
+                  const isPressed  = isActive || remotePressing.length > 0;
                   return (
                     <button key={note.name} onPointerDown={handlePianoPointerDown(note.name)} onPointerUp={handlePianoPointerEnd} onPointerCancel={handlePianoPointerEnd} onPointerLeave={handlePianoPointerEnd}
                       className={`flex-1 relative rounded-b-md key-press-anim flex flex-col items-center justify-end pb-3 ${isExpected?'lesson-glow':''}`}
-                      style={{ background:isActive?'linear-gradient(180deg,#ffd991,#f0a830)':isExpected?'linear-gradient(180deg,#fff7e0,#f5d98a)':'linear-gradient(180deg,#f8f2e6,#e8ddc8)', boxShadow:isActive?'inset 0 4px 8px rgba(0,0,0,.15),0 1px 0 rgba(255,255,255,.5)':'0 2px 0 rgba(0,0,0,.4),inset 0 -2px 8px rgba(0,0,0,.08)', transform:isActive?'translateY(2px)':'translateY(0)', cursor:'pointer', border:'none', touchAction:'none' }}>
-                      {/* Remote player dots */}
-                      {remotePressing.length > 0 && (
-                        <div style={{ position:'absolute', top:5, left:'50%', transform:'translateX(-50%)', display:'flex', gap:3, zIndex:5 }}>
-                          {remotePressing.map(rp => <div key={rp.peerId} style={{ width:8, height:8, borderRadius:'50%', background:rp.color, boxShadow:`0 0 6px ${rp.color}` }}/>)}
+                      style={{ overflow:'visible', background:pressGrad??(isActive?'linear-gradient(180deg,#ffd991,#f0a830)':isExpected?'linear-gradient(180deg,#fff7e0,#f5d98a)':'linear-gradient(180deg,#f8f2e6,#e8ddc8)'), boxShadow:pressColor?`inset 0 4px 8px rgba(0,0,0,.15),0 0 14px ${pressColor}66`:(isPressed?'inset 0 4px 8px rgba(0,0,0,.15),0 1px 0 rgba(255,255,255,.5)':'0 2px 0 rgba(0,0,0,.4),inset 0 -2px 8px rgba(0,0,0,.08)'), transform:isActive?'translateY(2px)':'translateY(0)', cursor:'pointer', border:'none', touchAction:'none' }}>
+                      {/* Free mode: floating label */}
+                      {freeMode && freeFloats.filter(f => f.noteName===note.name).map(f => (
+                        <span key={f.id} className="free-float" style={{ fontSize:13, color:pressColor||'#f0a830', textShadow:`0 0 10px currentColor` }}>
+                          {labelLang==='pt'?note.pt:note.en}
+                        </span>
+                      ))}
+                      {/* Free mode: click count */}
+                      {freeMode && (keyClickCounts.get(note.name)||0)>0 && (
+                        <div style={{ position:'absolute', top:6, right:3, background:'rgba(0,0,0,.6)', color:'#f0a830', borderRadius:8, fontSize:9, padding:'1px 4px', fontWeight:700, zIndex:10, lineHeight:1.4, pointerEvents:'none' }}>
+                          {keyClickCounts.get(note.name)}
                         </div>
                       )}
-                      {showLabels && <span className="display-font text-xs md:text-sm font-medium pointer-events-none" style={{ color:isActive||isExpected?'#5a3a0a':'#7a6850' }}>{labelLang==='pt'?note.pt:note.en}</span>}
-                      {showKeyboardHints && <span className="text-[9px] mt-1 px-1.5 py-0.5 rounded font-mono pointer-events-none" style={{ background:isActive||isExpected?'rgba(255,255,255,.5)':'rgba(0,0,0,.06)', color:isActive||isExpected?'#5a3a0a':'#9a8870' }}>{note.key.toUpperCase()}</span>}
+                      {showLabels && <span className="display-font text-xs md:text-sm font-medium pointer-events-none" style={{ color:pressColor?'#fff':(isActive||isExpected?'#5a3a0a':'#7a6850') }}>{labelLang==='pt'?note.pt:note.en}</span>}
+                      {showKeyboardHints && <span className="text-[9px] mt-1 px-1.5 py-0.5 rounded font-mono pointer-events-none" style={{ background:isPressed?'rgba(255,255,255,.5)':'rgba(0,0,0,.06)', color:isPressed?'#5a3a0a':'#9a8870' }}>{note.key.toUpperCase()}</span>}
                     </button>
                   );
                 })}
@@ -1879,17 +1943,27 @@ export default function PianoMidi() {
                   const isActive   = activeNotes.has(note.name);
                   const isExpected = sheetMode ? (sheetExpectedNote===note.name) : (expectedNote===note.name);
                   const remotePressing = remoteNoteDisplay.get(note.name) || [];
+                  const pressColor = (isActive && mpInRoom) ? mpMeRef.current.color : (remotePressing.length > 0 ? remotePressing[0].color : null);
+                  const pressGrad  = pressColor ? `linear-gradient(180deg,${lightenColor(pressColor)},${pressColor})` : null;
+                  const isPressed  = isActive || remotePressing.length > 0;
                   return (
                     <button key={note.name} onPointerDown={handlePianoPointerDown(note.name)} onPointerUp={handlePianoPointerEnd} onPointerCancel={handlePianoPointerEnd} onPointerLeave={handlePianoPointerEnd}
                       className={`absolute rounded-b-md key-press-anim flex flex-col items-center justify-end pb-2 pointer-events-auto ${isExpected?'lesson-glow':''}`}
-                      style={{ left:`${BLACK_KEY_LEFTS.get(note.name)}%`, width:`${WHITE_KEY_WIDTH*.6}%`, height:'62%', top:0, background:isActive?'linear-gradient(180deg,#f0a830,#c97e1a)':isExpected?'linear-gradient(180deg,#d4a04a,#8a5a14)':'linear-gradient(180deg,#2a201a,#14100c)', boxShadow:isActive?'inset 0 4px 8px rgba(0,0,0,.3)':'0 3px 0 rgba(0,0,0,.7),inset 0 -3px 4px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.1)', transform:isActive?'translateY(2px)':'translateY(0)', cursor:'pointer', border:'none', zIndex:2, touchAction:'none' }}>
-                      {remotePressing.length > 0 && (
-                        <div style={{ position:'absolute', top:4, left:'50%', transform:'translateX(-50%)', display:'flex', gap:2, zIndex:5 }}>
-                          {remotePressing.map(rp => <div key={rp.peerId} style={{ width:6, height:6, borderRadius:'50%', background:rp.color, boxShadow:`0 0 5px ${rp.color}` }}/>)}
+                      style={{ left:`${BLACK_KEY_LEFTS.get(note.name)}%`, width:`${WHITE_KEY_WIDTH*.6}%`, height:'62%', top:0, overflow:'visible', background:pressGrad??(isActive?'linear-gradient(180deg,#f0a830,#c97e1a)':isExpected?'linear-gradient(180deg,#d4a04a,#8a5a14)':'linear-gradient(180deg,#2a201a,#14100c)'), boxShadow:pressColor?`inset 0 4px 8px rgba(0,0,0,.3),0 0 14px ${pressColor}88`:(isPressed?'inset 0 4px 8px rgba(0,0,0,.3)':'0 3px 0 rgba(0,0,0,.7),inset 0 -3px 4px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.1)'), transform:isActive?'translateY(2px)':'translateY(0)', cursor:'pointer', border:'none', zIndex:2, touchAction:'none' }}>
+                      {/* Free mode: floating label */}
+                      {freeMode && freeFloats.filter(f => f.noteName===note.name).map(f => (
+                        <span key={f.id} className="free-float" style={{ fontSize:11, color:pressColor||'#f0a830', textShadow:`0 0 10px currentColor` }}>
+                          {labelLang==='pt'?note.pt:note.en}
+                        </span>
+                      ))}
+                      {/* Free mode: click count */}
+                      {freeMode && (keyClickCounts.get(note.name)||0)>0 && (
+                        <div style={{ position:'absolute', top:4, right:2, background:'rgba(0,0,0,.75)', color:'#f0a830', borderRadius:6, fontSize:8, padding:'0 3px', fontWeight:700, zIndex:10, lineHeight:1.5, pointerEvents:'none' }}>
+                          {keyClickCounts.get(note.name)}
                         </div>
                       )}
-                      {showLabels && <span className="display-font text-[10px] font-medium pointer-events-none" style={{ color:isActive?'#1a1108':'#a89a87' }}>{labelLang==='pt'?note.pt:note.en}</span>}
-                      {showKeyboardHints && <span className="text-[8px] mt-0.5 px-1 py-0 rounded font-mono pointer-events-none" style={{ background:'rgba(255,255,255,.1)', color:isActive?'#1a1108':'#c9b89a' }}>{note.key.toUpperCase()}</span>}
+                      {showLabels && <span className="display-font text-[10px] font-medium pointer-events-none" style={{ color:pressColor?'#fff':(isPressed?'#1a1108':'#a89a87') }}>{labelLang==='pt'?note.pt:note.en}</span>}
+                      {showKeyboardHints && <span className="text-[8px] mt-0.5 px-1 py-0 rounded font-mono pointer-events-none" style={{ background:'rgba(255,255,255,.1)', color:isPressed?'#1a1108':'#c9b89a' }}>{note.key.toUpperCase()}</span>}
                     </button>
                   );
                 })}
@@ -1914,6 +1988,14 @@ export default function PianoMidi() {
               <button onClick={() => setLabelLang(labelLang==='pt'?'en':'pt')} className="px-3 py-2 rounded-full text-xs transition-colors" style={{ background:'rgba(255,255,255,.03)', border:'1px solid rgba(255,255,255,.06)', color:'#a89a87' }}>
                 {labelLang==='pt'?'Dó Ré Mi':'C D E'}
               </button>
+              <button onClick={() => { setFreeMode(v => !v); setKeyClickCounts(new Map()); setFreeFloats([]); }} className="px-3 py-2 rounded-full text-xs flex items-center gap-2 transition-colors" style={{ background:freeMode?'rgba(155,209,126,.15)':'rgba(255,255,255,.03)', border:`1px solid ${freeMode?'rgba(155,209,126,.3)':'rgba(255,255,255,.06)'}`, color:freeMode?'#9bd17e':'#a89a87' }}>
+                <Sparkles size={12}/> Modo Livre
+              </button>
+              {freeMode && (
+                <button onClick={() => setKeyClickCounts(new Map())} className="px-3 py-2 rounded-full text-xs transition-colors" style={{ background:'rgba(255,255,255,.03)', border:'1px solid rgba(255,255,255,.06)', color:'#a89a87' }}>
+                  Zerar
+                </button>
+              )}
             </div>
             <div className="flex items-center gap-3 text-xs" style={{ color:'#8a7d6c' }}>
               <span className="hidden md:inline">Entrada:</span>
@@ -2021,6 +2103,19 @@ export default function PianoMidi() {
                       style={{ background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.1)', color:'#f5efe6' }}/>
                   </div>
                   <div>
+                    <label className="text-xs uppercase tracking-wider mb-1 block" style={{ color:'#8a7d6c' }}>Sua cor</label>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {['#9bd17e','#7bb3f0','#e07c5e','#c77ee0','#60d4c8','#f09050','#f5e050'].map(c => {
+                        const selected = (mpCustomColor||nameToColor(mpName||'_'))===c;
+                        return <button key={c} onClick={() => setMpCustomColor(c)} className="w-7 h-7 rounded-full transition-all hover:scale-110" style={{ background:c, outline:selected?`2px solid #fff`:undefined, outlineOffset:2 }}/>;
+                      })}
+                      <label style={{ cursor:'pointer', position:'relative' }}>
+                        <div className="w-7 h-7 rounded-full flex items-center justify-center text-sm" style={{ background: mpCustomColor || nameToColor(mpName||'_'), border:'2px solid rgba(255,255,255,.2)' }}>🎨</div>
+                        <input type="color" value={mpCustomColor||nameToColor(mpName||'_')} onChange={e => setMpCustomColor(e.target.value)} style={{ position:'absolute', opacity:0, width:0, height:0, pointerEvents:'none' }}/>
+                      </label>
+                    </div>
+                  </div>
+                  <div>
                     <label className="text-xs uppercase tracking-wider mb-1 block" style={{ color:'#8a7d6c' }}>Código da sala</label>
                     <input value={mpCode} onChange={e => setMpCode(e.target.value.toUpperCase().replace(/\s/g,''))} onKeyDown={e => e.key==='Enter' && joinRoom()}
                       placeholder="Ex: JAZZ42" maxLength={16} className="w-full px-4 py-3 rounded-xl text-sm outline-none font-mono tracking-widest"
@@ -2076,13 +2171,28 @@ export default function PianoMidi() {
                   ))}
                 </div>
 
+                {/* Color picker */}
+                <div className="mb-4 px-3 py-3 rounded-xl" style={{ background:'rgba(255,255,255,.03)', border:'1px solid rgba(255,255,255,.05)' }}>
+                  <div className="text-xs mb-2" style={{ color:'#8a7d6c' }}>Sua cor</div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {['#9bd17e','#7bb3f0','#e07c5e','#c77ee0','#60d4c8','#f09050','#f5e050'].map(c => {
+                      const myColor = mpMembers.find(m => m.isMe)?.color;
+                      return <button key={c} onClick={() => changeMyColor(c)} className="w-7 h-7 rounded-full transition-all hover:scale-110" style={{ background:c, outline:myColor===c?`2px solid #fff`:undefined, outlineOffset:2 }}/>;
+                    })}
+                    <label style={{ cursor:'pointer', position:'relative' }}>
+                      <div className="w-7 h-7 rounded-full flex items-center justify-center text-sm" style={{ background: mpMembers.find(m => m.isMe)?.color || '#9bd17e', border:'2px solid rgba(255,255,255,.2)' }}>🎨</div>
+                      <input type="color" value={mpMembers.find(m => m.isMe)?.color || '#9bd17e'} onChange={e => changeMyColor(e.target.value)} style={{ position:'absolute', opacity:0, width:0, height:0, pointerEvents:'none' }}/>
+                    </label>
+                  </div>
+                </div>
+
                 {mpStatus && <p className="text-sm mb-3 px-3 py-2 rounded-lg" style={{ background:'rgba(224,124,94,.1)', color:'#e07c5e', border:'1px solid rgba(224,124,94,.2)' }}>{mpStatus}</p>}
 
                 <button onClick={() => { leaveRoom(); setMpOpen(false); }} className="w-full py-3 rounded-xl text-sm font-semibold transition-all hover:scale-[1.02]" style={{ background:'rgba(224,124,94,.1)', border:'1px solid rgba(224,124,94,.2)', color:'#e07c5e' }}>
                   Sair da Sala
                 </button>
                 <p className="text-xs mt-3 text-center" style={{ color:'#6b6052' }}>
-                  As notas de cada músico aparecem como pontos coloridos nas teclas.
+                  As teclas ficam da cor do músico que as pressiona.
                 </p>
               </>
             )}
