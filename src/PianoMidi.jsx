@@ -2302,11 +2302,12 @@ export default function PianoMidi() {
                       <div key={note.id} title="Clique para remover" onClick={() => { if (!composerPlaying) setComposerNotes(p => p.filter(n => n.id !== note.id)); }}
                         style={{ flexShrink:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'flex-end', gap:3,
                           width:note.dur>=2?64:note.dur>=1?52:42, height:isPlay?72:62,
-                          borderRadius:8, padding:'6px 4px',
+                          borderRadius:8, padding:'6px 4px', position:'relative',
                           background:isPlay?'linear-gradient(135deg,#f0a830,#c97e1a)':'rgba(255,255,255,.04)',
                           border:`1px solid ${isPlay?'transparent':'rgba(255,255,255,.08)'}`,
                           color:isPlay?'#1a1108':'#a89a87', cursor:composerPlaying?'default':'pointer',
                           transition:'all .15s', boxShadow:isPlay?'0 6px 20px -4px rgba(240,168,48,.5)':'none' }}>
+                        {!composerPlaying && !isPlay && <span style={{ position:'absolute', top:3, right:5, fontSize:11, color:'rgba(224,124,94,.8)', lineHeight:1, fontWeight:700, pointerEvents:'none' }}>×</span>}
                         <NoteIcon dur={note.dur} color={isPlay?'#1a1108':'#f0a830'} size={14}/>
                         <span style={{ fontFamily:'Fraunces,Georgia,serif', fontWeight:600, fontSize:note.name==='rest'?11:13 }}>
                           {note.name==='rest'?'𝄽':( labelLang==='pt'?nd?.pt:nd?.en )}
@@ -2384,8 +2385,8 @@ export default function PianoMidi() {
                     onPointerDown={composerMode
                       ? (e) => { e.preventDefault(); try{e.currentTarget.setPointerCapture(e.pointerId);}catch{} addComposerNote(note.name, composerSelDur); playNote(note.name); }
                       : handlePianoPointerDown(note.name)}
-                    onPointerUp={composerMode ? undefined : handlePianoPointerEnd}
-                    onPointerCancel={composerMode ? undefined : handlePianoPointerEnd}
+                    onPointerUp={composerMode ? () => releaseNote(note.name) : handlePianoPointerEnd}
+                    onPointerCancel={composerMode ? () => releaseNote(note.name) : handlePianoPointerEnd}
                     onPointerLeave={composerMode ? undefined : handlePianoPointerEnd}
                     className="flex-1 relative rounded-b-md key-press-anim flex flex-col items-center justify-end pb-2"
                     style={{ overflow:'visible', background:pressGrad??(isActive?'linear-gradient(180deg,#ffd991,#f0a830)':'linear-gradient(180deg,#f0eade,#d8ceba)'), boxShadow:pressColor?`inset 0 4px 8px rgba(0,0,0,.15),0 0 16px ${pressColor}77`:(isActive?'inset 0 4px 8px rgba(0,0,0,.15)':'0 2px 0 rgba(0,0,0,.5),inset 0 -2px 6px rgba(0,0,0,.1)'), transform:isActive?'translateY(2px)':'translateY(0)', cursor:'pointer', border:'none', touchAction:'none' }}>
@@ -2406,8 +2407,8 @@ export default function PianoMidi() {
                     onPointerDown={composerMode
                       ? (e) => { e.preventDefault(); try{e.currentTarget.setPointerCapture(e.pointerId);}catch{} addComposerNote(note.name, composerSelDur); playNote(note.name); }
                       : handlePianoPointerDown(note.name)}
-                    onPointerUp={composerMode ? undefined : handlePianoPointerEnd}
-                    onPointerCancel={composerMode ? undefined : handlePianoPointerEnd}
+                    onPointerUp={composerMode ? () => releaseNote(note.name) : handlePianoPointerEnd}
+                    onPointerCancel={composerMode ? () => releaseNote(note.name) : handlePianoPointerEnd}
                     onPointerLeave={composerMode ? undefined : handlePianoPointerEnd}
                     className="absolute rounded-b-md key-press-anim flex flex-col items-center justify-end pb-1 pointer-events-auto"
                     style={{ left:`${BLACK_KEY_LEFTS.get(note.name)}%`, width:`${WHITE_KEY_WIDTH*.6}%`, height:'62%', top:0, overflow:'visible', background:pressGrad??(isActive?'linear-gradient(180deg,#f0a830,#c97e1a)':'linear-gradient(180deg,#1e1510,#0a0806)'), boxShadow:pressColor?`inset 0 4px 8px rgba(0,0,0,.3),0 0 16px ${pressColor}99`:(isActive?'inset 0 4px 8px rgba(0,0,0,.3)':'0 3px 0 rgba(0,0,0,.8),inset 0 -2px 4px rgba(0,0,0,.6)'), transform:isActive?'translateY(2px)':'translateY(0)', cursor:'pointer', border:'none', zIndex:2, touchAction:'none' }}>
