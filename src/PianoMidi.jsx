@@ -574,6 +574,7 @@ export default function PianoMidi() {
   const [freeMode,       setFreeMode]       = useState(false);
   const [keyClickCounts, setKeyClickCounts] = useState(() => new Map());
   const [freeFloats,     setFreeFloats]     = useState([]); // [{id, noteName}]
+  const [risingBars,     setRisingBars]     = useState([]); // barras subindo no modo livre
 
   // Audio refs
   const synthRef       = useRef(null);
@@ -596,9 +597,15 @@ export default function PianoMidi() {
   const mpMembersRef     = useRef([]);
   const remoteNotesRef   = useRef(new Map()); // noteName → [{peerId, color}]
   const broadcastNoteRef = useRef(null);       // always-fresh broadcast fn
-  const freeModeRef      = useRef(false);
-  const freeModePlayRef  = useRef(null);
-  const freeFloatIdRef   = useRef(0);
+  const freeModeRef           = useRef(false);
+  const freeModePlayRef       = useRef(null);
+  const freeFloatIdRef        = useRef(0);
+  const risingBarsRef         = useRef([]);
+  const risingBarIdRef        = useRef(0);
+  const risingRafRef          = useRef(null);
+  const risingUpdateRef       = useRef(null);
+  const createFreeModeBarRef  = useRef(null);
+  const releaseFreeModeBarRef = useRef(null);
 
   // Lesson refs
   const currentSongRef      = useRef(null);
@@ -775,6 +782,7 @@ export default function PianoMidi() {
     try { synthRef.current?.triggerRelease(noteName); } catch (e) {}
     setActiveNotes(prev => { const s = new Set(prev); s.delete(noteName); return s; });
     broadcastNoteRef.current?.(noteName, 'off');
+    releaseFreeModeBarRef.current?.(noteName);
   }, []);
 
   useEffect(() => { releaseNoteRef.current = releaseNote; }, [releaseNote]);
@@ -783,9 +791,47 @@ export default function PianoMidi() {
     freeModePlayRef.current = (noteName) => {
       if (!freeModeRef.current) return;
       setKeyClickCounts(prev => { const n = new Map(prev); n.set(noteName, (n.get(noteName)||0)+1); return n; });
-      const id = ++freeFloatIdRef.current;
-      setFreeFloats(prev => [...prev, { id, noteName }]);
-      setTimeout(() => setFreeFloats(prev => prev.filter(f => f.id !== id)), 900);
+      const barColor = mpInRoomRef.current ? mpMeRef.current.color : '#ffffff';
+      createFreeModeBarRef.current?.(noteName, barColor);
+    };
+  }); // no deps — always fresh
+
+  useEffect(() => {
+    risingUpdateRef.current = () => {
+      const now = performance.now();
+      const updated = risingBarsRef.current.map(bar => {
+        if (!bar.released) return { ...bar, height: Math.max(4, (now - bar.startTime) * 0.16) };
+        const el = now - bar.releaseTime;
+        return { ...bar, floatY: el * 0.2, opacity: Math.max(0, 1 - el / 950) };
+      }).filter(b => !b.released || b.opacity > 0);
+      risingBarsRef.current = updated;
+      setRisingBars([...updated]);
+      if (updated.length) risingRafRef.current = setTimeout(risingUpdateRef.current, 16);
+      else risingRafRef.current = null;
+    };
+    createFreeModeBarRef.current = (noteName, color) => {
+      if (!freeModeRef.current) return;
+      const note = NOTES.find(n => n.name === noteName);
+      if (!note) return;
+      const wIdx = WHITE_KEYS.findIndex(n => n.name === noteName);
+      const barLeft = note.isBlack ? (BLACK_KEY_LEFTS.get(noteName) ?? 0) : wIdx * WHITE_KEY_WIDTH;
+      const barW = note.isBlack ? WHITE_KEY_WIDTH * 0.55 : WHITE_KEY_WIDTH - 0.3;
+      const id = ++risingBarIdRef.current;
+      risingBarsRef.current = [...risingBarsRef.current,
+        { id, noteName, startTime: performance.now(), height: 0, released: false, floatY: 0, opacity: 1, isBlack: note.isBlack, left: barLeft, width: barW, color }
+      ];
+      if (risingUpdateRef.current) {
+        if (risingRafRef.current) clearTimeout(risingRafRef.current);
+        risingRafRef.current = setTimeout(risingUpdateRef.current, 16);
+      }
+    };
+    releaseFreeModeBarRef.current = (noteName) => {
+      const now = performance.now();
+      let found = false;
+      risingBarsRef.current = risingBarsRef.current.map(bar => {
+        if (!found && bar.noteName === noteName && !bar.released) { found = true; return { ...bar, released: true, releaseTime: now }; }
+        return bar;
+      });
     };
   }); // no deps — always fresh
 
@@ -841,6 +887,8 @@ export default function PianoMidi() {
       remoteNotesRef.current.set(noteName, cur.filter(x => x.peerId !== peerId));
     }
     setRemoteNoteDisplay(new Map(remoteNotesRef.current));
+    if (type === 'on') createFreeModeBarRef.current?.(noteName, color);
+    else releaseFreeModeBarRef.current?.(noteName);
   }
 
   function mpBroadcastAll(msg, exceptId = null) {
@@ -993,7 +1041,10 @@ export default function PianoMidi() {
   }, []);
 
   // Cleanup on unmount
-  useEffect(() => () => leaveRoom(), []); // eslint-disable-line
+  useEffect(() => () => {
+    leaveRoom();
+    if (risingRafRef.current) clearTimeout(risingRafRef.current);
+  }, []); // eslint-disable-line
 
   // ---------------------------------------------------------------
   // Training RAF loop — defined with no stale closures (all refs)
@@ -1988,14 +2039,9 @@ export default function PianoMidi() {
               <button onClick={() => setLabelLang(labelLang==='pt'?'en':'pt')} className="px-3 py-2 rounded-full text-xs transition-colors" style={{ background:'rgba(255,255,255,.03)', border:'1px solid rgba(255,255,255,.06)', color:'#a89a87' }}>
                 {labelLang==='pt'?'Dó Ré Mi':'C D E'}
               </button>
-              <button onClick={() => { setFreeMode(v => !v); setKeyClickCounts(new Map()); setFreeFloats([]); }} className="px-3 py-2 rounded-full text-xs flex items-center gap-2 transition-colors" style={{ background:freeMode?'rgba(155,209,126,.15)':'rgba(255,255,255,.03)', border:`1px solid ${freeMode?'rgba(155,209,126,.3)':'rgba(255,255,255,.06)'}`, color:freeMode?'#9bd17e':'#a89a87' }}>
+              <button onClick={() => { setFreeMode(true); }} className="px-3 py-2 rounded-full text-xs flex items-center gap-2 transition-colors" style={{ background:'rgba(155,209,126,.15)', border:'1px solid rgba(155,209,126,.3)', color:'#9bd17e' }}>
                 <Sparkles size={12}/> Modo Livre
               </button>
-              {freeMode && (
-                <button onClick={() => setKeyClickCounts(new Map())} className="px-3 py-2 rounded-full text-xs transition-colors" style={{ background:'rgba(255,255,255,.03)', border:'1px solid rgba(255,255,255,.06)', color:'#a89a87' }}>
-                  Zerar
-                </button>
-              )}
             </div>
             <div className="flex items-center gap-3 text-xs" style={{ color:'#8a7d6c' }}>
               <span className="hidden md:inline">Entrada:</span>
@@ -2078,6 +2124,95 @@ export default function PianoMidi() {
       <footer className="px-6 md:px-10 py-6 text-center text-xs" style={{ color:'#6b6052', borderTop:'1px solid rgba(255,255,255,.04)' }}>
         Allegretto · Piano virtual com Web MIDI API · {SONGS.length} músicas · Aprender · Treino · Partitura · Multiplayer
       </footer>
+
+      {/* ── MODO LIVRE — tela dedicada ── */}
+      {freeMode && (
+        <div className="fixed inset-0 z-40 flex flex-col" style={{ background:'#06060e' }}>
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-3 flex-shrink-0" style={{ borderBottom:'1px solid rgba(255,255,255,.06)' }}>
+            <div className="flex items-center gap-3">
+              <button onClick={() => { setFreeMode(false); if(risingRafRef.current){clearTimeout(risingRafRef.current);risingRafRef.current=null;} risingBarsRef.current=[]; setRisingBars([]); setKeyClickCounts(new Map()); }} className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:scale-105" style={{ background:'rgba(255,255,255,.07)', border:'1px solid rgba(255,255,255,.12)', color:'#a89a87' }}>
+                <X size={14}/>
+              </button>
+              <span className="display-font text-xl" style={{ color:'#f5efe6' }}>Modo Livre</span>
+              {mpInRoom && (
+                <span className="text-xs px-2 py-0.5 rounded-full flex items-center gap-1.5" style={{ background:'rgba(155,209,126,.12)', color:'#9bd17e', border:'1px solid rgba(155,209,126,.25)' }}>
+                  <span className="w-1.5 h-1.5 rounded-full inline-block animate-ping" style={{background:'#9bd17e'}}/>
+                  {mpCode} · {mpMembers.length} músicos
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setKeyClickCounts(new Map())} className="text-xs px-3 py-1.5 rounded-full transition-colors" style={{ background:'rgba(255,255,255,.05)', border:'1px solid rgba(255,255,255,.08)', color:'#6b6052' }}>
+                Zerar
+              </button>
+              <button onClick={() => setMpOpen(true)} className="text-xs px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-colors" style={{ background:mpInRoom?'rgba(155,209,126,.1)':'rgba(255,255,255,.05)', border:`1px solid ${mpInRoom?'rgba(155,209,126,.25)':'rgba(255,255,255,.08)'}`, color:mpInRoom?'#9bd17e':'#8a7d6c' }}>
+                <Radio size={11}/>{mpInRoom ? mpCode : 'Ao Vivo'}
+              </button>
+            </div>
+          </div>
+
+          {/* Canvas das barras */}
+          <div className="flex-1 relative overflow-hidden">
+            {risingBars.map(bar => (
+              <div key={bar.id} style={{
+                position:'absolute', bottom:0,
+                left:`${bar.left}%`, width:`${bar.width}%`,
+                height: Math.max(4, bar.height),
+                transform:`translateY(-${bar.floatY}px)`,
+                opacity: bar.opacity,
+                background: bar.color === '#ffffff'
+                  ? 'linear-gradient(0deg,rgba(255,255,255,.15) 0%,rgba(255,255,255,.9) 40%,#ffffff 100%)'
+                  : `linear-gradient(0deg,${bar.color}22 0%,${bar.color}bb 40%,${bar.color} 100%)`,
+                boxShadow: bar.color === '#ffffff'
+                  ? '0 0 18px rgba(255,255,255,.5), 0 0 40px rgba(255,255,255,.15)'
+                  : `0 0 18px ${bar.color}88, 0 0 40px ${bar.color}33`,
+                borderRadius:'3px 3px 0 0',
+              }}/>
+            ))}
+          </div>
+
+          {/* Piano */}
+          <div className="relative select-none w-full flex-shrink-0" style={{ height:200, background:'#0e0a06' }}>
+            <div className="absolute inset-0 flex gap-[2px] px-[2px]">
+              {WHITE_KEYS.map(note => {
+                const isActive = activeNotes.has(note.name);
+                const remotePressing = remoteNoteDisplay.get(note.name) || [];
+                const pressColor = (isActive && mpInRoom) ? mpMeRef.current.color : (remotePressing.length > 0 ? remotePressing[0].color : null);
+                const pressGrad = pressColor ? `linear-gradient(180deg,${lightenColor(pressColor)},${pressColor})` : null;
+                const cnt = keyClickCounts.get(note.name) || 0;
+                return (
+                  <button key={note.name}
+                    onPointerDown={handlePianoPointerDown(note.name)} onPointerUp={handlePianoPointerEnd}
+                    onPointerCancel={handlePianoPointerEnd} onPointerLeave={handlePianoPointerEnd}
+                    className="flex-1 relative rounded-b-md key-press-anim flex flex-col items-center justify-end pb-2"
+                    style={{ overflow:'visible', background:pressGrad??(isActive?'linear-gradient(180deg,#ffd991,#f0a830)':'linear-gradient(180deg,#f0eade,#d8ceba)'), boxShadow:pressColor?`inset 0 4px 8px rgba(0,0,0,.15),0 0 16px ${pressColor}77`:(isActive?'inset 0 4px 8px rgba(0,0,0,.15)':'0 2px 0 rgba(0,0,0,.5),inset 0 -2px 6px rgba(0,0,0,.1)'), transform:isActive?'translateY(2px)':'translateY(0)', cursor:'pointer', border:'none', touchAction:'none' }}>
+                    {cnt > 0 && <div style={{ position:'absolute', top:5, right:2, background:'rgba(0,0,0,.55)', color:pressColor||'#f0a830', borderRadius:7, fontSize:9, padding:'1px 4px', fontWeight:700, zIndex:10, lineHeight:1.4, pointerEvents:'none' }}>{cnt}</div>}
+                    <span className="display-font text-xs font-medium pointer-events-none" style={{ color:pressColor?'#fff':(isActive?'#5a3a0a':'#7a6850') }}>{labelLang==='pt'?note.pt:note.en}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="absolute inset-0 pointer-events-none">
+              {BLACK_KEYS.map(note => {
+                const isActive = activeNotes.has(note.name);
+                const remotePressing = remoteNoteDisplay.get(note.name) || [];
+                const pressColor = (isActive && mpInRoom) ? mpMeRef.current.color : (remotePressing.length > 0 ? remotePressing[0].color : null);
+                const pressGrad = pressColor ? `linear-gradient(180deg,${lightenColor(pressColor)},${pressColor})` : null;
+                return (
+                  <button key={note.name}
+                    onPointerDown={handlePianoPointerDown(note.name)} onPointerUp={handlePianoPointerEnd}
+                    onPointerCancel={handlePianoPointerEnd} onPointerLeave={handlePianoPointerEnd}
+                    className="absolute rounded-b-md key-press-anim flex flex-col items-center justify-end pb-1 pointer-events-auto"
+                    style={{ left:`${BLACK_KEY_LEFTS.get(note.name)}%`, width:`${WHITE_KEY_WIDTH*.6}%`, height:'62%', top:0, overflow:'visible', background:pressGrad??(isActive?'linear-gradient(180deg,#f0a830,#c97e1a)':'linear-gradient(180deg,#1e1510,#0a0806)'), boxShadow:pressColor?`inset 0 4px 8px rgba(0,0,0,.3),0 0 16px ${pressColor}99`:(isActive?'inset 0 4px 8px rgba(0,0,0,.3)':'0 3px 0 rgba(0,0,0,.8),inset 0 -2px 4px rgba(0,0,0,.6)'), transform:isActive?'translateY(2px)':'translateY(0)', cursor:'pointer', border:'none', zIndex:2, touchAction:'none' }}>
+                    <span className="display-font text-[9px] font-medium pointer-events-none" style={{ color:pressColor?'#fff':(isActive?'#1a1108':'#6a5a4a') }}>{labelLang==='pt'?note.pt:note.en}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── MULTIPLAYER MODAL (lobby + room panel) ── */}
       {mpOpen && (

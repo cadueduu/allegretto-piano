@@ -93,11 +93,30 @@ Estados: `idle → countdown → playing → complete`
 
 ### 4. Modo Livre (`freeMode`)
 
-- Toggle no painel de controles abaixo do piano
-- Ao pressionar qualquer tecla: etiqueta com nome da nota flutua pra cima (animação CSS `floatUp`)
-- Contador de cliques exibido no canto da tecla (`keyClickCounts` Map)
-- Botão "Zerar" reseta contadores
-- Funciona em paralelo com todos os outros modos
+- Botão "Modo Livre" nos controles abre uma **tela dedicada fullscreen** (`z-40`)
+- Tela escura (#06060e) com canvas de barras acima + piano na base (200px)
+- Ao pressionar uma tecla: barra vertical cresce de baixo pra cima enquanto mantém pressionada
+- Ao soltar: barra sobe e desvanece (opacity fades em 950ms)
+- **Loop de animação**: `risingUpdateRef.current()` chamado via `setTimeout(16ms)` — não usa `requestAnimationFrame` para funcionar em abas ocultas
+- Barras em multiplayer: cor do jogador local/remoto; solo: branco com glow
+- Contador de cliques por tecla no canto da tecla
+- Botão "Zerar" no header da tela livre
+- Botão "Ao Vivo" no header para abrir o painel multiplayer sem sair do modo
+
+**Estrutura das barras** (`risingBars` state + `risingBarsRef` ref):
+```js
+{ id, noteName, startTime, height, released, releaseTime, floatY, opacity, isBlack, left, width, color }
+```
+- `height` aumenta: `(now - startTime) * 0.16` px/ms
+- `floatY` após release: `(now - releaseTime) * 0.2` px/ms
+- Filtradas quando `opacity <= 0`
+
+**Refs do loop**:
+- `risingBarsRef` — array de barras (fonte de verdade para o loop)
+- `risingRafRef` — ID do setTimeout atual (clearTimeout ao fechar ou criar nova barra)
+- `risingUpdateRef` — função sempre fresca do loop (always-fresh useEffect)
+- `createFreeModeBarRef` — cria barra + reinicia loop (always-fresh, always cancels+restarts timer)
+- `releaseFreeModeBarRef` — marca 1ª barra não-solta do noteName como released
 
 ---
 
@@ -226,3 +245,4 @@ Multiplayer: mpOpen, mpInRoom, mpIsHost, mpName, mpCustomColor, mpCode, mpMember
 |--------|----------|
 | v1 | Piano MIDI, 3 modos (Aprender/Treino/Partitura), 18 músicas, multiplayer WebRTC básico com pontinhos coloridos |
 | v2 | Modo Livre (animação float + contador por tecla), cor total da tecla no multiplayer, seletor de cor no multiplayer (lobby + sala + broadcast em tempo real) |
+| v3 | Modo Livre redesenhado: tela dedicada fullscreen, barras crescem pra cima (estilo pianoverse.net), animação via setTimeout (funciona em background), barras por cor do jogador no multiplayer |
