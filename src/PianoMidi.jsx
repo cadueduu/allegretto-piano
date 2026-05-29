@@ -1735,20 +1735,38 @@ export default function PianoMidi() {
                     <div className="h-full transition-all duration-500" style={{ width:`${(currentNoteIndex/parsedSongNotes.length)*100}%`, background:'linear-gradient(90deg,#c97e1a,#f0a830)', boxShadow:'0 0 12px rgba(240,168,48,.5)' }}/>
                   </div>
                   <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                    {upcomingNotes.map((noteObj, i) => {
-                      const nd = NOTES.find(x => x.name === noteObj.name);
-                      if (!nd) return null;
-                      const isNext = i === 0;
-                      const typeName = getNoteTypeName(noteObj.dur);
-                      const noteColor = isNext ? '#1a1108' : '#a89a87';
-                      return (
-                        <div key={`${noteObj.name}-${i}-${currentNoteIndex}`} className={`flex-shrink-0 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all ${isNext?'celebrate-anim':''}`} style={{ width:isNext?80:60, height:isNext?84:64, background:isNext?'linear-gradient(135deg,#f0a830,#c97e1a)':'rgba(255,255,255,.04)', border:isNext?'none':'1px solid rgba(255,255,255,.08)', color:noteColor, boxShadow:isNext?'0 8px 30px -6px rgba(240,168,48,.55)':'none', opacity:1-(i*.07) }}>
-                          <NoteIcon dur={noteObj.dur} color={noteColor} size={isNext?16:12}/>
-                          <div className={`display-font font-medium ${isNext?'text-lg':'text-sm'}`}>{labelLang==='pt'?nd.pt:nd.en}</div>
-                          <div className="text-[9px] opacity-60 leading-none">{typeName}</div>
-                        </div>
-                      );
-                    })}
+                    {(() => {
+                      // Check if the song uses the same note display name in multiple octaves
+                      const displayToOctaves = new Map();
+                      parsedSongNotes.forEach(n => {
+                        const nd2 = NOTES.find(x => x.name === n.name);
+                        if (!nd2) return;
+                        const disp = labelLang==='pt' ? nd2.pt : nd2.en;
+                        const oct = n.name.slice(-1);
+                        if (!displayToOctaves.has(disp)) displayToOctaves.set(disp, new Set());
+                        displayToOctaves.get(disp).add(oct);
+                      });
+                      const octaveSuper = { '4':'⁴', '5':'⁵', '6':'⁶', '3':'³' };
+                      return upcomingNotes.map((noteObj, i) => {
+                        const nd = NOTES.find(x => x.name === noteObj.name);
+                        if (!nd) return null;
+                        const isNext = i === 0;
+                        const typeName = getNoteTypeName(noteObj.dur);
+                        const noteColor = isNext ? '#1a1108' : '#a89a87';
+                        const dispName = labelLang==='pt' ? nd.pt : nd.en;
+                        const oct = noteObj.name.slice(-1);
+                        const showOct = (displayToOctaves.get(dispName)?.size ?? 0) > 1;
+                        return (
+                          <div key={`${noteObj.name}-${i}-${currentNoteIndex}`} className={`flex-shrink-0 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all ${isNext?'celebrate-anim':''}`} style={{ width:isNext?80:60, height:isNext?84:64, background:isNext?'linear-gradient(135deg,#f0a830,#c97e1a)':'rgba(255,255,255,.04)', border:isNext?'none':'1px solid rgba(255,255,255,.08)', color:noteColor, boxShadow:isNext?'0 8px 30px -6px rgba(240,168,48,.55)':'none', opacity:1-(i*.07) }}>
+                            <NoteIcon dur={noteObj.dur} color={noteColor} size={isNext?16:12}/>
+                            <div className={`display-font font-medium ${isNext?'text-lg':'text-sm'} leading-tight`}>
+                              {dispName}{showOct && <sup style={{ fontSize:'0.6em', opacity:0.75 }}>{octaveSuper[oct]||oct}</sup>}
+                            </div>
+                            <div className="text-[9px] opacity-60 leading-none">{typeName}</div>
+                          </div>
+                        );
+                      });
+                    })()}
                   </div>
                 </>
               )}
