@@ -2281,53 +2281,108 @@ export default function PianoMidi() {
           {/* Canvas das barras OU área do compositor */}
           {composerMode ? (
             <div className="flex-1 flex flex-col overflow-hidden">
-              {/* Rail de notas */}
-              <div ref={composerRailRef} className="flex-1 overflow-x-auto flex items-end gap-1 px-4 py-3" style={{ minHeight:100, scrollbarWidth:'thin', scrollbarColor:'rgba(255,255,255,.1) transparent' }}>
+              {/* Partitura SVG */}
+              <div ref={composerRailRef} className="flex-1 overflow-x-auto" style={{ minHeight:STAFF_SVG_H+16, background:'#0d0a07', borderRadius:'8px 8px 0 0', scrollbarWidth:'thin', scrollbarColor:'rgba(255,255,255,.1) transparent' }}>
                 {composerNotes.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center w-full" style={{ color:'#3a2e22', userSelect:'none' }}>
+                  <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', width:'100%', height:STAFF_SVG_H+16, color:'#3a2e22', userSelect:'none' }}>
                     <Music size={36} style={{ opacity:.25, marginBottom:8 }}/>
                     <p style={{ fontSize:13 }}>Toque as teclas do piano para adicionar notas</p>
                   </div>
                 ) : (() => {
-                  const [num, den] = composerTimeSig.split('/').map(Number);
-                  const beatsPerMeasure = num * (4 / den);
-                  let cum = 0; let measure = 1; const els = [];
+                  const [sigNum, sigDen] = composerTimeSig.split('/').map(Number);
+                  const beatsPerMeasure = sigNum * (4 / sigDen);
+                  const PX = 68;
+                  const LEFT = 84;
+                  const SL = STAFF_LINE_SPACING;
+                  const ST = STAFF_TOP;
+                  const lineYs = [ST, ST+SL, ST+SL*2, ST+SL*3, ST+SL*4];
+                  const ledgerBelow  = ST + SL*5;
+                  const ledger1Above = ST - SL;
+                  const ledger2Above = ST - SL*2;
+                  const totalBeats = composerNotes.reduce((s, n) => s + n.dur, 0);
+                  const svgW = Math.max(560, LEFT + totalBeats * PX + 80);
+                  const noteEls = [];
+                  let cum = 0;
                   composerNotes.forEach((note, i) => {
-                    if (i === 0) els.push(
-                      <span key="m1" style={{ fontSize:9, color:'#6b5a3a', alignSelf:'flex-start', paddingTop:4, marginRight:2, flexShrink:0 }}>{measure}</span>
-                    );
-                    const nd = NOTES.find(x => x.name === note.name);
+                    const nx  = LEFT + cum * PX;
                     const isPlay = composerPlayIdx === i;
-                    els.push(
-                      <div key={note.id} title="Clique para remover" onClick={() => { if (!composerPlaying) setComposerNotes(p => p.filter(n => n.id !== note.id)); }}
-                        style={{ flexShrink:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'flex-end', gap:3,
-                          width:note.dur>=2?64:note.dur>=1?52:42, height:isPlay?72:62,
-                          borderRadius:8, padding:'6px 4px', position:'relative',
-                          background:isPlay?'linear-gradient(135deg,#f0a830,#c97e1a)':'rgba(255,255,255,.04)',
-                          border:`1px solid ${isPlay?'transparent':'rgba(255,255,255,.08)'}`,
-                          color:isPlay?'#1a1108':'#a89a87', cursor:composerPlaying?'default':'pointer',
-                          transition:'all .15s', boxShadow:isPlay?'0 6px 20px -4px rgba(240,168,48,.5)':'none' }}>
-                        {!composerPlaying && !isPlay && <span style={{ position:'absolute', top:3, right:5, fontSize:11, color:'rgba(224,124,94,.8)', lineHeight:1, fontWeight:700, pointerEvents:'none' }}>×</span>}
-                        <NoteIcon dur={note.dur} color={isPlay?'#1a1108':'#f0a830'} size={14}/>
-                        <span style={{ fontFamily:'Fraunces,Georgia,serif', fontWeight:600, fontSize:note.name==='rest'?11:13 }}>
-                          {note.name==='rest'?'𝄽':( labelLang==='pt'?nd?.pt:nd?.en )}
-                        </span>
-                        <span style={{ fontSize:9, opacity:.6 }}>{getNoteTypeName(note.dur).slice(0,4)}</span>
-                      </div>
-                    );
-                    cum += note.dur;
-                    // bar line check
-                    if (Math.abs(cum % beatsPerMeasure) < 0.01 && i < composerNotes.length - 1) {
-                      measure++;
-                      els.push(
-                        <div key={`bl-${i}`} style={{ width:2, height:56, background:'rgba(255,255,255,.15)', borderRadius:1, flexShrink:0, alignSelf:'center' }}/>
+                    const isRest = note.name === 'rest';
+                    const clr = isPlay ? '#f0a830' : '#e8dfd0';
+                    const dur = note.dur;
+                    if (!isRest) {
+                      const step   = NOTE_STAFF_STEPS[note.name] ?? 6;
+                      const ny     = ST + (10 - step) * (SL / 2);
+                      const stemDn = step > 6;
+                      const isWhole   = dur >= 3.6;
+                      const isHalf    = !isWhole && dur >= 1.8;
+                      const is16th    = !isWhole && !isHalf && dur < 0.4;
+                      const isEighth  = !isWhole && !isHalf && !is16th && dur < 0.85;
+                      const hasSharp  = note.name.includes('#');
+                      const stemX  = stemDn ? nx - 5.5 : nx + 5.5;
+                      const stemY2 = stemDn ? ny + 30  : ny - 30;
+                      noteEls.push(
+                        <g key={note.id} onClick={() => { if (!composerPlaying) setComposerNotes(p => p.filter(n => n.id !== note.id)); }} style={{ cursor:composerPlaying?'default':'pointer' }}>
+                          <rect x={nx-14} y={Math.min(ny,stemY2)-4} width={28} height={Math.abs(stemY2-ny)+30} fill="transparent"/>
+                          {isPlay && <circle cx={nx} cy={ny} r={14} fill="#f0a830" opacity="0.18"/>}
+                          {step <= 0  && <line x1={nx-10} y1={ledgerBelow}  x2={nx+10} y2={ledgerBelow}  stroke={clr} strokeWidth="1.5"/>}
+                          {step >= 12 && <line x1={nx-10} y1={ledger1Above} x2={nx+10} y2={ledger1Above} stroke={clr} strokeWidth="1.5"/>}
+                          {step >= 14 && <line x1={nx-10} y1={ledger2Above} x2={nx+10} y2={ledger2Above} stroke={clr} strokeWidth="1.5"/>}
+                          {hasSharp && <text x={nx-17} y={ny+5} fill={clr} fontSize="12" fontFamily="serif" style={{pointerEvents:'none'}}>♯</text>}
+                          {isWhole
+                            ? <ellipse cx={nx} cy={ny} rx={7.5} ry={5.5} stroke={clr} strokeWidth="2"   fill="none"/>
+                            : isHalf
+                            ? <ellipse cx={nx} cy={ny} rx={6.5} ry={5}   stroke={clr} strokeWidth="1.8" fill="none"/>
+                            : <ellipse cx={nx} cy={ny} rx={6.5} ry={5}   fill={clr}/>
+                          }
+                          {!composerPlaying && !isPlay && <text x={nx+9} y={ny-9} fill="rgba(224,124,94,0.6)" fontSize="9" fontWeight="bold" style={{pointerEvents:'none'}}>×</text>}
+                          {!isWhole && <line x1={stemX} y1={ny} x2={stemX} y2={stemY2} stroke={clr} strokeWidth="1.5"/>}
+                          {isEighth && (stemDn
+                            ? <path d={`M${stemX},${stemY2} C${stemX+14},${stemY2-8} ${stemX+15},${stemY2-16} ${stemX+2},${stemY2-22}`} stroke={clr} strokeWidth="1.5" fill="none"/>
+                            : <path d={`M${stemX},${stemY2} C${stemX+14},${stemY2+8} ${stemX+15},${stemY2+16} ${stemX+2},${stemY2+22}`} stroke={clr} strokeWidth="1.5" fill="none"/>
+                          )}
+                          {is16th && (stemDn ? <>
+                            <path d={`M${stemX},${stemY2}   C${stemX+14},${stemY2-8}  ${stemX+15},${stemY2-16} ${stemX+2},${stemY2-22}`} stroke={clr} strokeWidth="1.5" fill="none"/>
+                            <path d={`M${stemX},${stemY2-7} C${stemX+14},${stemY2-15} ${stemX+15},${stemY2-23} ${stemX+2},${stemY2-29}`} stroke={clr} strokeWidth="1.5" fill="none"/>
+                          </> : <>
+                            <path d={`M${stemX},${stemY2}   C${stemX+14},${stemY2+8}  ${stemX+15},${stemY2+16} ${stemX+2},${stemY2+22}`} stroke={clr} strokeWidth="1.5" fill="none"/>
+                            <path d={`M${stemX},${stemY2+7} C${stemX+14},${stemY2+15} ${stemX+15},${stemY2+23} ${stemX+2},${stemY2+29}`} stroke={clr} strokeWidth="1.5" fill="none"/>
+                          </>)}
+                        </g>
                       );
-                      els.push(
-                        <span key={`mn-${i}`} style={{ fontSize:9, color:'#6b5a3a', alignSelf:'flex-start', paddingTop:4, marginRight:2, flexShrink:0 }}>{measure}</span>
+                    } else {
+                      const rc = isPlay ? '#f0a830' : '#a89a87';
+                      const ry = ST + SL*2;
+                      noteEls.push(
+                        <g key={note.id} onClick={() => { if (!composerPlaying) setComposerNotes(p => p.filter(n => n.id !== note.id)); }} style={{ cursor:composerPlaying?'default':'pointer' }}>
+                          <rect x={nx-12} y={ry-10} width={24} height={28} fill="transparent"/>
+                          {dur >= 3.6 && <rect x={nx-7} y={ST+SL} width={14} height={5} fill={rc}/>}
+                          {dur >= 1.8 && dur < 3.6 && <rect x={nx-7} y={ST+SL*2-5} width={14} height={5} fill={rc}/>}
+                          {dur >= 0.85 && dur < 1.8 && <text x={nx-5} y={ST+SL*2+10} fill={rc} fontSize="20" fontFamily="serif" style={{pointerEvents:'none'}}>𝄽</text>}
+                          {dur >= 0.4  && dur < 0.85 && <text x={nx-4} y={ST+SL*2+8}  fill={rc} fontSize="16" fontFamily="serif" style={{pointerEvents:'none'}}>𝄾</text>}
+                          {dur <  0.4  && <text x={nx-4} y={ST+SL*2+10} fill={rc} fontSize="18" fontFamily="serif" style={{pointerEvents:'none'}}>𝄿</text>}
+                          {!composerPlaying && !isPlay && <text x={nx+11} y={ry-1} fill="rgba(224,124,94,0.6)" fontSize="9" fontWeight="bold" style={{pointerEvents:'none'}}>×</text>}
+                        </g>
                       );
                     }
+                    cum += dur;
+                    if (Math.abs(cum % beatsPerMeasure) < 0.01 && i < composerNotes.length - 1) {
+                      const bx = LEFT + cum * PX;
+                      noteEls.push(<line key={`bl-${i}`} x1={bx} y1={ST-4} x2={bx} y2={ST+SL*4+4} stroke="rgba(255,255,255,0.28)" strokeWidth="1.5"/>);
+                    }
                   });
-                  return els;
+                  return (
+                    <svg width={svgW} height={STAFF_SVG_H+8} style={{ display:'block' }}>
+                      {lineYs.map((y, idx) => (
+                        <line key={idx} x1={42} y1={y} x2={svgW-14} y2={y} stroke="rgba(255,255,255,0.2)" strokeWidth="1"/>
+                      ))}
+                      <line x1={svgW-14} y1={ST} x2={svgW-14} y2={ST+SL*4} stroke="rgba(255,255,255,0.25)" strokeWidth="1.5"/>
+                      <line x1={svgW-11} y1={ST} x2={svgW-11} y2={ST+SL*4} stroke="rgba(255,255,255,0.5)"  strokeWidth="3"/>
+                      <text x="2" y={ST+SL*4+6} fill="rgba(240,168,48,0.8)" fontSize={SL*5.8} fontFamily="serif" style={{ userSelect:'none', pointerEvents:'none' }}>𝄞</text>
+                      <text x="49" y={ST+SL*1.5+6} fill="rgba(240,168,48,0.65)" fontSize={SL*2} fontFamily="serif" fontWeight="bold" textAnchor="middle" style={{ userSelect:'none', pointerEvents:'none' }}>{sigNum}</text>
+                      <text x="49" y={ST+SL*3.5+6} fill="rgba(240,168,48,0.65)" fontSize={SL*2} fontFamily="serif" fontWeight="bold" textAnchor="middle" style={{ userSelect:'none', pointerEvents:'none' }}>{sigDen}</text>
+                      {noteEls}
+                    </svg>
+                  );
                 })()}
               </div>
 
