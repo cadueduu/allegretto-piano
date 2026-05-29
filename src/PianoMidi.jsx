@@ -604,6 +604,10 @@ export default function PianoMidi() {
   const [followMaxCombo, setFollowMaxCombo] = useState(0);
   const [followHits,     setFollowHits]     = useState({ perfect:0, good:0, miss:0 });
   const [followFeedback, setFollowFeedback] = useState(null);
+  // Custom songs (criadas no compositor e salvas no menu)
+  const [customSongs,    setCustomSongs]    = useState(() => { try { return JSON.parse(localStorage.getItem('allegretto-custom-songs') || '[]'); } catch(e) { return []; } });
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [saveSongName,   setSaveSongName]   = useState('');
   const [instrumentId,   setInstrumentId]   = useState('piano');
 
   // Audio refs
@@ -657,6 +661,10 @@ export default function PianoMidi() {
   const followFbTimerRef  = useRef(null);
   const followTotalMsRef  = useRef(0);
   const followLoopRef     = useRef(null);
+  // Compositor — sync refs para multiplayer
+  const composerNotesRef   = useRef([]);
+  const composerBpmRef     = useRef(90);
+  const composerTimeSigRef = useRef('4/4');
   const composerTimersRef     = useRef([]);
   const composerRailRef       = useRef(null);
 
@@ -894,8 +902,11 @@ export default function PianoMidi() {
   useEffect(() => { releaseNoteRef.current = releaseNote; }, [releaseNote]);
   useEffect(() => { freeModeRef.current    = freeMode; },    [freeMode]);
   useEffect(() => { composerModeRef.current  = composerMode; }, [composerMode]);
-  useEffect(() => { composerSavedRef.current = composerSaved;  }, [composerSaved]);
-  useEffect(() => { followStateRef.current   = followState;    }, [followState]);
+  useEffect(() => { composerSavedRef.current   = composerSaved;   }, [composerSaved]);
+  useEffect(() => { followStateRef.current     = followState;     }, [followState]);
+  useEffect(() => { composerNotesRef.current   = composerNotes;   }, [composerNotes]);
+  useEffect(() => { composerBpmRef.current     = composerBpm;     }, [composerBpm]);
+  useEffect(() => { composerTimeSigRef.current = composerTimeSig; }, [composerTimeSig]);
   useEffect(() => {
     freeModePlayRef.current = (noteName) => {
       if (!freeModeRef.current) return;
@@ -1055,11 +1066,18 @@ export default function PianoMidi() {
   }, [ensureAudio]);
 
   const addComposerNote = useCallback((noteName, dur) => {
-    const id = ++composerNoteIdRef.current;
-    setComposerNotes(prev => [...prev, { id, name: noteName, dur }]);
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+    const note = { id, name: noteName, dur };
+    setComposerNotes(prev => [...prev, note]);
+    mpBroadStateRef.current?.({ type: 'composer_note_add', note });
     requestAnimationFrame(() => {
       if (composerRailRef.current) composerRailRef.current.scrollLeft = composerRailRef.current.scrollWidth;
     });
+  }, []);
+
+  const deleteComposerNote = useCallback((noteId) => {
+    setComposerNotes(p => p.filter(n => n.id !== noteId));
+    mpBroadStateRef.current?.({ type: 'composer_note_delete', noteId });
   }, []);
 
   function mpBroadcastAll(msg, exceptId = null) {
@@ -1086,6 +1104,10 @@ export default function PianoMidi() {
             try { conn.send({ type: 'sheet_mode', on: true }); } catch(e) {}
             if (sheetStateRef.current === 'playing' || sheetStateRef.current === 'countdown')
               try { conn.send({ type: 'sheet_start' }); } catch(e) {}
+          }
+          // Sync compositor state
+          if (composerModeRef.current) {
+            try { conn.send({ type: 'composer_sync', notes: composerNotesRef.current, bpm: composerBpmRef.current, timeSig: composerTimeSigRef.current, saved: composerSavedRef.current }); } catch(e) {}
           }
         }, 100);
       } else if (msg.type === 'note_on') {
@@ -1118,6 +1140,42 @@ export default function PianoMidi() {
       } else if (msg.type === 'sheet_stop') {
         stopSheetRef.current?.();
         mpBroadcastAll({ type: 'sheet_stop' }, conn.peer);
+      } else if (msg.type === 'composer_enter') {
+        if (!freeModeRef.current) setFreeMode(true);
+        setComposerMode(true); setComposerSaved(false);
+        mpBroadcastAll({ type: 'composer_enter' }, conn.peer);
+      } else if (msg.type === 'composer_exit') {
+        setComposerMode(false); setComposerSaved(false);
+        mpBroadcastAll({ type: 'composer_exit' }, conn.peer);
+      } else if (msg.type === 'composer_note_add') {
+        setComposerNotes(p => [...p, msg.note]);
+        mpBroadcastAll({ type: 'composer_note_add', note: msg.note }, conn.peer);
+      } else if (msg.type === 'composer_note_delete') {
+        setComposerNotes(p => p.filter(n => n.id !== msg.noteId));
+        mpBroadcastAll({ type: 'composer_note_delete', noteId: msg.noteId }, conn.peer);
+      } else if (msg.type === 'composer_clear') {
+        setComposerNotes([]);
+        mpBroadcastAll({ type: 'composer_clear' }, conn.peer);
+      } else if (msg.type === 'composer_bpm') {
+        setComposerBpm(msg.bpm);
+        mpBroadcastAll({ type: 'composer_bpm', bpm: msg.bpm }, conn.peer);
+      } else if (msg.type === 'composer_timesig') {
+        setComposerTimeSig(msg.sig);
+        mpBroadcastAll({ type: 'composer_timesig', sig: msg.sig }, conn.peer);
+      } else if (msg.type === 'composer_saved') {
+        setComposerNotes(msg.notes || []);
+        if (msg.bpm) setComposerBpm(msg.bpm);
+        if (msg.timeSig) setComposerTimeSig(msg.timeSig);
+        setComposerSaved(true);
+        mpBroadcastAll({ type: 'composer_saved', notes: msg.notes, bpm: msg.bpm, timeSig: msg.timeSig }, conn.peer);
+      } else if (msg.type === 'composer_sync') {
+        // sync-on-join: não relayar, só aplicar
+        if (!freeModeRef.current) setFreeMode(true);
+        setComposerMode(true);
+        setComposerNotes(msg.notes || []);
+        if (msg.bpm) setComposerBpm(msg.bpm);
+        if (msg.timeSig) setComposerTimeSig(msg.timeSig);
+        if (msg.saved) setComposerSaved(true);
       }
     });
     conn.on('close', () => {
@@ -1208,6 +1266,33 @@ export default function PianoMidi() {
                 setTimeout(() => startSheetRef.current?.(), 0);
               } else if (msg.type === 'sheet_stop') {
                 stopSheetRef.current?.();
+              } else if (msg.type === 'composer_enter') {
+                if (!freeModeRef.current) setFreeMode(true);
+                setComposerMode(true); setComposerSaved(false);
+              } else if (msg.type === 'composer_exit') {
+                setComposerMode(false); setComposerSaved(false);
+              } else if (msg.type === 'composer_note_add') {
+                setComposerNotes(p => [...p, msg.note]);
+              } else if (msg.type === 'composer_note_delete') {
+                setComposerNotes(p => p.filter(n => n.id !== msg.noteId));
+              } else if (msg.type === 'composer_clear') {
+                setComposerNotes([]);
+              } else if (msg.type === 'composer_bpm') {
+                setComposerBpm(msg.bpm);
+              } else if (msg.type === 'composer_timesig') {
+                setComposerTimeSig(msg.sig);
+              } else if (msg.type === 'composer_saved') {
+                setComposerNotes(msg.notes || []);
+                if (msg.bpm) setComposerBpm(msg.bpm);
+                if (msg.timeSig) setComposerTimeSig(msg.timeSig);
+                setComposerSaved(true);
+              } else if (msg.type === 'composer_sync') {
+                if (!freeModeRef.current) setFreeMode(true);
+                setComposerMode(true);
+                setComposerNotes(msg.notes || []);
+                if (msg.bpm) setComposerBpm(msg.bpm);
+                if (msg.timeSig) setComposerTimeSig(msg.timeSig);
+                if (msg.saved) setComposerSaved(true);
               }
           });
           conn.on('close', () => { setMpStatus('Host desconectou.'); leaveRoom(); });
@@ -2488,6 +2573,34 @@ export default function PianoMidi() {
               <button onClick={() => setShowSongList(false)} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background:'rgba(255,255,255,.05)', border:'1px solid rgba(255,255,255,.08)', color:'#a89a87' }}><X size={16}/></button>
             </div>
             <div className="space-y-2">
+              {/* Músicas criadas pelo usuário */}
+              {customSongs.length > 0 && (
+                <>
+                  <div className="text-xs uppercase tracking-[.18em] px-1 pb-1 pt-2 flex items-center justify-between" style={{ color:'#9bd17e' }}>
+                    <span>✏️ Suas criações ({customSongs.length})</span>
+                    <button onClick={() => { if (window.confirm('Remover todas as músicas criadas?')) { setCustomSongs([]); try { localStorage.removeItem('allegretto-custom-songs'); } catch(e2) {} } }} style={{ color:'rgba(224,124,94,.6)', fontSize:10, background:'none', border:'none', cursor:'pointer' }}>Remover todas</button>
+                  </div>
+                  {customSongs.map(song => {
+                    const beats = song.notes.reduce((s,n)=>s+(Array.isArray(n)?n[1]:1),0);
+                    const secs  = Math.round(beats / (song.bpm / 60));
+                    return (
+                      <button key={song.id} onClick={() => selectSong(song)} className="w-full p-4 rounded-xl text-left transition-all hover:scale-[1.01] flex items-center justify-between group" style={{ background:currentSong?.id===song.id?'rgba(155,209,126,.1)':'rgba(155,209,126,.03)', border:`1px solid ${currentSong?.id===song.id?'rgba(155,209,126,.35)':'rgba(155,209,126,.12)'}` }}>
+                        <div>
+                          <div className="display-font text-lg" style={{ color:'#f5efe6' }}>{song.title}</div>
+                          <div className="text-xs mt-0.5" style={{ color:'#8a7d6c' }}>{song.artist} · {song.notes.length} notas · ~{secs}s</div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          {song.timeSignature && <span className="display-font" style={{ fontSize:11, color:'#9bd17e', background:'rgba(155,209,126,.1)', border:'1px solid rgba(155,209,126,.2)', borderRadius:4, padding:'1px 6px' }}>{song.timeSignature}</span>}
+                          <span style={{ fontSize:10, color:'#9bd17e', opacity:.7 }}>✏️</span>
+                          <ChevronRight size={16} style={{ color:'#8a7d6c' }} className="group-hover:translate-x-1 transition-transform"/>
+                        </div>
+                      </button>
+                    );
+                  })}
+                  <div className="border-b my-2" style={{ borderColor:'rgba(255,255,255,.06)' }}/>
+                </>
+              )}
+              {/* Repertório padrão */}
               {SONGS.map(song => {
                 const beats = songBeats(song);
                 const secs  = Math.round(beats / (song.bpm / 60));
@@ -2523,7 +2636,7 @@ export default function PianoMidi() {
           <div className="flex items-center justify-between px-5 py-3 flex-shrink-0" style={{ borderBottom:'1px solid rgba(255,255,255,.06)' }}>
             <div className="flex items-center gap-3">
               <button onClick={() => {
-                if (composerMode) { stopComposer(); setComposerSaved(false); setComposerMode(false); }
+                if (composerMode) { stopComposer(); setComposerSaved(false); setComposerMode(false); mpBroadStateRef.current?.({ type: 'composer_exit' }); }
                 else { setFreeMode(false); if(risingRafRef.current){clearTimeout(risingRafRef.current);risingRafRef.current=null;} risingBarsRef.current=[]; setRisingBars([]); setKeyClickCounts(new Map()); }
               }} className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:scale-105" style={{ background:'rgba(255,255,255,.07)', border:'1px solid rgba(255,255,255,.12)', color:'#a89a87' }}>
                 <X size={14}/>
@@ -2544,11 +2657,11 @@ export default function PianoMidi() {
                   {/* BPM */}
                   <div className="flex items-center gap-1.5" style={{ background:'rgba(255,255,255,.05)', border:'1px solid rgba(255,255,255,.08)', borderRadius:8, padding:'4px 8px' }}>
                     <span style={{ color:'#6b6052', fontSize:10 }}>BPM</span>
-                    <input type="number" min={40} max={240} value={composerBpm} onChange={e => setComposerBpm(Math.max(40,Math.min(240,Number(e.target.value))))}
+                    <input type="number" min={40} max={240} value={composerBpm} onChange={e => { const b=Math.max(40,Math.min(240,Number(e.target.value))); setComposerBpm(b); mpBroadStateRef.current?.({ type:'composer_bpm', bpm:b }); }}
                       style={{ width:40, background:'transparent', border:'none', outline:'none', color:'#f0a830', fontSize:13, fontWeight:700, textAlign:'center' }}/>
                   </div>
                   {/* Time signature */}
-                  <select value={composerTimeSig} onChange={e => setComposerTimeSig(e.target.value)}
+                  <select value={composerTimeSig} onChange={e => { setComposerTimeSig(e.target.value); mpBroadStateRef.current?.({ type:'composer_timesig', sig:e.target.value }); }}
                     style={{ background:'rgba(255,255,255,.05)', border:'1px solid rgba(255,255,255,.08)', borderRadius:8, padding:'4px 8px', color:'#f0a830', fontSize:12, fontWeight:700, outline:'none' }}>
                     {['4/4','3/4','2/4','6/8','3/8'].map(ts => <option key={ts} value={ts} style={{background:'#1a1410'}}>{ts}</option>)}
                   </select>
@@ -2559,12 +2672,12 @@ export default function PianoMidi() {
                     {composerPlaying ? <><Square size={11}/> Parar</> : <><Play size={11}/> Ouvir</>}
                   </button>
                   {/* Clear */}
-                  <button onClick={() => { stopComposer(); setComposerNotes([]); }} className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs transition-colors" style={{ background:'rgba(255,255,255,.05)', border:'1px solid rgba(255,255,255,.08)', color:'#6b6052' }}>
+                  <button onClick={() => { stopComposer(); setComposerNotes([]); mpBroadStateRef.current?.({ type:'composer_clear' }); }} className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs transition-colors" style={{ background:'rgba(255,255,255,.05)', border:'1px solid rgba(255,255,255,.08)', color:'#6b6052' }}>
                     <Trash2 size={11}/> Limpar
                   </button>
-                  {/* Salvar partitura */}
+                  {/* Salvar partitura → abre dialog */}
                   {composerNotes.length > 0 && (
-                    <button onClick={() => { stopComposer(); setComposerSaved(true); }}
+                    <button onClick={() => { stopComposer(); setSaveSongName(''); setShowSaveDialog(true); }}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-colors"
                       style={{ background:'rgba(155,209,126,.18)', border:'1px solid rgba(155,209,126,.4)', color:'#9bd17e', fontWeight:600 }}>
                       <Check size={11}/> Salvar
@@ -2595,7 +2708,7 @@ export default function PianoMidi() {
                 </>
               ) : (
                 <>
-                  <button onClick={() => setComposerMode(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-colors" style={{ background:'rgba(240,168,48,.08)', border:'1px solid rgba(240,168,48,.2)', color:'#f0a830' }}>
+                  <button onClick={() => { setComposerMode(true); mpBroadStateRef.current?.({ type: 'composer_enter' }); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-colors" style={{ background:'rgba(240,168,48,.08)', border:'1px solid rgba(240,168,48,.2)', color:'#f0a830' }}>
                     <PenLine size={11}/> Criar Partitura
                   </button>
                   <button onClick={() => setMpOpen(true)} className="text-xs px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-colors" style={{ background:mpInRoom?'rgba(155,209,126,.1)':'rgba(255,255,255,.05)', border:`1px solid ${mpInRoom?'rgba(155,209,126,.25)':'rgba(255,255,255,.08)'}`, color:mpInRoom?'#9bd17e':'#8a7d6c' }}>
@@ -2641,7 +2754,7 @@ export default function PianoMidi() {
                 const stemX  = stemDn ? nx - 5.5 : nx + 5.5;
                 const stemY2 = stemDn ? ny + 30  : ny - 30;
                 noteEls.push(
-                  <g key={note.id} onClick={() => { if (!composerPlaying && !composerSaved) setComposerNotes(p => p.filter(n => n.id !== note.id)); }} style={{ cursor:(composerPlaying||composerSaved)?'default':'pointer' }}>
+                  <g key={note.id} onClick={() => { if (!composerPlaying && !composerSaved) deleteComposerNote(note.id); }} style={{ cursor:(composerPlaying||composerSaved)?'default':'pointer' }}>
                     <rect x={nx-14} y={Math.min(ny,stemY2)-4} width={28} height={Math.abs(stemY2-ny)+30} fill="transparent"/>
                     {isPlay && <circle cx={nx} cy={ny} r={14} fill="#f0a830" opacity="0.18"/>}
                     {step <= 0  && <line x1={nx-10} y1={ledgerBelow}  x2={nx+10} y2={ledgerBelow}  stroke={clr} strokeWidth="1.5"/>}
@@ -2673,7 +2786,7 @@ export default function PianoMidi() {
                 const rc = isPlay ? '#f0a830' : '#a89a87';
                 const ry = ST + SL*2;
                 noteEls.push(
-                  <g key={note.id} onClick={() => { if (!composerPlaying && !composerSaved) setComposerNotes(p => p.filter(n => n.id !== note.id)); }} style={{ cursor:(composerPlaying||composerSaved)?'default':'pointer' }}>
+                  <g key={note.id} onClick={() => { if (!composerPlaying && !composerSaved) deleteComposerNote(note.id); }} style={{ cursor:(composerPlaying||composerSaved)?'default':'pointer' }}>
                     <rect x={nx-12} y={ry-10} width={24} height={28} fill="transparent"/>
                     {dur >= 3.6 && <rect x={nx-7} y={ST+SL} width={14} height={5} fill={rc}/>}
                     {dur >= 1.8 && dur < 3.6 && <rect x={nx-7} y={ST+SL*2-5} width={14} height={5} fill={rc}/>}
@@ -2893,6 +3006,66 @@ export default function PianoMidi() {
                 );
               })}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: SALVAR PARTITURA ── */}
+      {showSaveDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background:'rgba(0,0,0,.75)', backdropFilter:'blur(12px)' }}>
+          <div className="w-full max-w-sm rounded-2xl p-6 fade-in" style={{ background:'linear-gradient(180deg,#1a1410,#0f0c08)', border:'1px solid rgba(255,255,255,.1)', boxShadow:'0 40px 100px -20px rgba(0,0,0,.9)' }}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background:'linear-gradient(135deg,#9bd17e,#5a9d3e)' }}>
+                <Music size={18} style={{ color:'#0d2a07' }}/>
+              </div>
+              <div>
+                <div className="display-font text-xl" style={{ color:'#f5efe6' }}>Salvar Partitura</div>
+                <div className="text-xs" style={{ color:'#8a7d6c' }}>Dê um nome para adicionar ao repertório</div>
+              </div>
+            </div>
+            <input
+              value={saveSongName}
+              onChange={e => setSaveSongName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && saveSongName.trim()) {
+                  const newSong = { id:`custom-${Date.now()}`, title:saveSongName.trim(), artist: mpInRoom ? (mpName||'Sala') : 'Modo Livre', difficulty:1, bpm:composerBpmRef.current, timeSignature:composerTimeSigRef.current, notes:composerNotesRef.current.map(n=>[n.name,n.dur]), isCustom:true };
+                  const upd = [...customSongs, newSong];
+                  setCustomSongs(upd); try { localStorage.setItem('allegretto-custom-songs', JSON.stringify(upd)); } catch(e2) {}
+                  setComposerSaved(true); setShowSaveDialog(false); setSaveSongName('');
+                  mpBroadStateRef.current?.({ type:'composer_saved', notes:composerNotesRef.current, bpm:composerBpmRef.current, timeSig:composerTimeSigRef.current });
+                }
+              }}
+              placeholder="Ex: Minha Música"
+              autoFocus
+              maxLength={40}
+              className="w-full px-4 py-3 rounded-xl text-sm outline-none mb-3"
+              style={{ background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.1)', color:'#f5efe6' }}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  if (!saveSongName.trim()) return;
+                  const newSong = { id:`custom-${Date.now()}`, title:saveSongName.trim(), artist: mpInRoom ? (mpName||'Sala') : 'Modo Livre', difficulty:1, bpm:composerBpmRef.current, timeSignature:composerTimeSigRef.current, notes:composerNotesRef.current.map(n=>[n.name,n.dur]), isCustom:true };
+                  const upd = [...customSongs, newSong];
+                  setCustomSongs(upd); try { localStorage.setItem('allegretto-custom-songs', JSON.stringify(upd)); } catch(e2) {}
+                  setComposerSaved(true); setShowSaveDialog(false); setSaveSongName('');
+                  mpBroadStateRef.current?.({ type:'composer_saved', notes:composerNotesRef.current, bpm:composerBpmRef.current, timeSig:composerTimeSigRef.current });
+                }}
+                disabled={!saveSongName.trim()}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-40 transition-all hover:scale-[1.02] disabled:cursor-not-allowed"
+                style={{ background:'linear-gradient(135deg,#9bd17e,#5a9d3e)', color:'#0d2a07' }}>
+                <Check size={14}/> Salvar e Adicionar ao Menu
+              </button>
+            </div>
+            <button
+              onClick={() => {
+                setComposerSaved(true); setShowSaveDialog(false); setSaveSongName('');
+                mpBroadStateRef.current?.({ type:'composer_saved', notes:composerNotesRef.current, bpm:composerBpmRef.current, timeSig:composerTimeSigRef.current });
+              }}
+              className="w-full mt-2 py-2 rounded-xl text-sm text-center transition-colors hover:scale-[1.01]"
+              style={{ background:'rgba(255,255,255,.04)', border:'1px solid rgba(255,255,255,.07)', color:'#6b6052' }}>
+              Apenas salvar (sem adicionar ao menu)
+            </button>
           </div>
         </div>
       )}
