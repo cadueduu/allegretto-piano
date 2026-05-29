@@ -680,7 +680,7 @@ export default function PianoMidi() {
   // ---------------------------------------------------------------
   // Play note — called on every key press regardless of mode
   // ---------------------------------------------------------------
-  const playNote = useCallback(async (noteName) => {
+  const playNote = useCallback(async (noteName, isMidi = false) => {
     await ensureAudio();
     // Always play the sound the player triggers — sustain until key is released
     try { synthRef.current?.triggerAttack(noteName); } catch (e) {}
@@ -768,7 +768,10 @@ export default function PianoMidi() {
     if (!trainingMode && !sheetMode && currentSongRef.current && !songCompleteRef.current) {
       const parsed   = currentSongRef.current.notes.map(parseNote);
       const expected = parsed[currentNoteIndexRef.current]?.name;
-      if (noteName === expected) {
+      // MIDI keyboards may be in a different octave — match by pitch class (strip octave digit)
+      const pitchOf  = n => n?.replace(/\d+$/, '');
+      const matches  = isMidi ? pitchOf(noteName) === pitchOf(expected) : noteName === expected;
+      if (matches) {
         const next = currentNoteIndexRef.current + 1;
         if (next >= parsed.length) setSongComplete(true);
         else setCurrentNoteIndex(next);
@@ -1376,7 +1379,7 @@ export default function PianoMidi() {
         const note = findNoteByMidi(mn);
         if (note) {
           if (!audioReadyRef.current) Tone.start().then(() => { audioReadyRef.current = true; setAudioReady(true); }).catch(() => {});
-          playNoteRef.current?.(note.name);
+          playNoteRef.current?.(note.name, true); // isMidi=true: match lesson by pitch class
         }
       }
     };
