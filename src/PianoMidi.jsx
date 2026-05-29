@@ -604,6 +604,7 @@ export default function PianoMidi() {
   const risingBarIdRef        = useRef(0);
   const risingRafRef          = useRef(null);
   const risingUpdateRef       = useRef(null);
+  const risingCanvasRef       = useRef(null);
   const createFreeModeBarRef  = useRef(null);
   const releaseFreeModeBarRef = useRef(null);
 
@@ -799,11 +800,15 @@ export default function PianoMidi() {
   useEffect(() => {
     risingUpdateRef.current = () => {
       const now = performance.now();
+      const canvasH = risingCanvasRef.current?.offsetHeight || 600;
       const updated = risingBarsRef.current.map(bar => {
-        if (!bar.released) return { ...bar, height: Math.max(4, (now - bar.startTime) * 0.16) };
+        if (!bar.released) return { ...bar, height: Math.max(40, (now - bar.startTime) * 0.16) };
         const el = now - bar.releaseTime;
-        return { ...bar, floatY: el * 0.2, opacity: Math.max(0, 1 - el / 950) };
-      }).filter(b => !b.released || b.opacity > 0);
+        const floatY = el * 0.38;
+        const fadeStart = Math.max(0, canvasH - bar.height - 40);
+        const opacity = floatY < fadeStart ? 1 : Math.max(0, 1 - (floatY - fadeStart) / (canvasH - fadeStart + bar.height));
+        return { ...bar, floatY, opacity };
+      }).filter(b => !b.released || b.floatY <= b.height + (risingCanvasRef.current?.offsetHeight || 600));
       risingBarsRef.current = updated;
       setRisingBars([...updated]);
       if (updated.length) risingRafRef.current = setTimeout(risingUpdateRef.current, 16);
@@ -818,7 +823,7 @@ export default function PianoMidi() {
       const barW = note.isBlack ? WHITE_KEY_WIDTH * 0.55 : WHITE_KEY_WIDTH - 0.3;
       const id = ++risingBarIdRef.current;
       risingBarsRef.current = [...risingBarsRef.current,
-        { id, noteName, startTime: performance.now(), height: 0, released: false, floatY: 0, opacity: 1, isBlack: note.isBlack, left: barLeft, width: barW, color }
+        { id, noteName, startTime: performance.now(), height: 40, released: false, floatY: 0, opacity: 1, isBlack: note.isBlack, left: barLeft, width: barW, color }
       ];
       if (risingUpdateRef.current) {
         if (risingRafRef.current) clearTimeout(risingRafRef.current);
@@ -2153,12 +2158,12 @@ export default function PianoMidi() {
           </div>
 
           {/* Canvas das barras */}
-          <div className="flex-1 relative overflow-hidden">
+          <div ref={risingCanvasRef} className="flex-1 relative overflow-hidden">
             {risingBars.map(bar => (
               <div key={bar.id} style={{
                 position:'absolute', bottom:0,
                 left:`${bar.left}%`, width:`${bar.width}%`,
-                height: Math.max(4, bar.height),
+                height: Math.max(40, bar.height),
                 transform:`translateY(-${bar.floatY}px)`,
                 opacity: bar.opacity,
                 background: bar.color === '#ffffff'
