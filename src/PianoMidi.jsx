@@ -48,6 +48,18 @@ function getNoteStaffY(name) {
 }
 
 // ============================================================================
+// INSTRUMENTS
+// ============================================================================
+const INSTRUMENTS = [
+  { id: 'piano',   label: 'Piano',     opts: { oscillator: { type: 'triangle' }, envelope: { attack: 0.005, decay: 0.4,  sustain: 0.15, release: 1.4  } } },
+  { id: 'epiano',  label: 'Piano El.', opts: { oscillator: { type: 'triangle' }, envelope: { attack: 0.002, decay: 0.9,  sustain: 0.04, release: 1.8  } } },
+  { id: 'organ',   label: 'Órgão',     opts: { oscillator: { type: 'square'   }, envelope: { attack: 0.01,  decay: 0.01, sustain: 1,    release: 0.12 } } },
+  { id: 'strings', label: 'Cordas',    opts: { oscillator: { type: 'sawtooth' }, envelope: { attack: 0.4,   decay: 0.1,  sustain: 0.9,  release: 1.6  } } },
+  { id: 'flute',   label: 'Flauta',    opts: { oscillator: { type: 'sine'     }, envelope: { attack: 0.08,  decay: 0.1,  sustain: 0.85, release: 0.7  } } },
+  { id: 'bells',   label: 'Sinos',     opts: { oscillator: { type: 'triangle' }, envelope: { attack: 0.001, decay: 0.6,  sustain: 0.02, release: 1.2  } } },
+];
+
+// ============================================================================
 // NOTES
 // ============================================================================
 const NOTES = [
@@ -582,9 +594,11 @@ export default function PianoMidi() {
   const [composerSelDur, setComposerSelDur] = useState(1);
   const [composerPlaying,setComposerPlaying]= useState(false);
   const [composerPlayIdx,setComposerPlayIdx]= useState(-1);
+  const [instrumentId,   setInstrumentId]   = useState('piano');
 
   // Audio refs
   const synthRef       = useRef(null);
+  const reverbRef      = useRef(null);
   const audioReadyRef  = useRef(false);
 
   // Input dedup
@@ -673,6 +687,7 @@ export default function PianoMidi() {
     }).connect(reverb);
     synth.volume.value = Tone.gainToDb(0.7);
     synthRef.current   = synth;
+    reverbRef.current  = reverb;
     return () => { try { synth.dispose(); reverb.dispose(); } catch (e) {} };
   }, []);
 
@@ -682,8 +697,15 @@ export default function PianoMidi() {
 
   useEffect(() => { audioReadyRef.current = audioReady; }, [audioReady]);
 
+  // Instrument change
+  useEffect(() => {
+    const inst = INSTRUMENTS.find(i => i.id === instrumentId);
+    if (!inst || !synthRef.current) return;
+    try { synthRef.current.set(inst.opts); } catch(e) {}
+  }, [instrumentId]);
+
   const ensureAudio = useCallback(async () => {
-    if (!audioReadyRef.current) {
+    if (!audioReadyRef.current || Tone.context.state !== 'running') {
       try { await Tone.start(); audioReadyRef.current = true; setAudioReady(true); } catch (e) {}
     }
   }, []);
@@ -2121,6 +2143,16 @@ export default function PianoMidi() {
                 <Volume2 size={16} style={{ color:'#a89a87' }}/>
                 <input type="range" min="0" max="100" value={volume*100} onChange={e => setVolume(e.target.value/100)} className="w-24" style={{ accentColor:'#f0a830' }}/>
                 <span className="text-xs font-mono w-8" style={{ color:'#8a7d6c' }}>{Math.round(volume*100)}</span>
+              </div>
+              {/* Instrument selector */}
+              <div className="flex items-center gap-1 px-2 py-1 rounded-full overflow-x-auto" style={{ background:'rgba(255,255,255,.03)', border:'1px solid rgba(255,255,255,.06)', scrollbarWidth:'none', flexShrink:0 }}>
+                {INSTRUMENTS.map(inst => (
+                  <button key={inst.id} onClick={async () => { await ensureAudio(); setInstrumentId(inst.id); }}
+                    className="px-2 py-0.5 rounded-full text-xs whitespace-nowrap transition-colors"
+                    style={{ background:instrumentId===inst.id?'rgba(240,168,48,.2)':'transparent', color:instrumentId===inst.id?'#f0a830':'#8a7d6c', fontWeight:instrumentId===inst.id?600:400, border:'none', cursor:'pointer' }}>
+                    {inst.label}
+                  </button>
+                ))}
               </div>
               <button onClick={() => setShowLabels(!showLabels)} className="px-3 py-2 rounded-full text-xs flex items-center gap-2 transition-colors" style={{ background:showLabels?'rgba(240,168,48,.15)':'rgba(255,255,255,.03)', border:`1px solid ${showLabels?'rgba(240,168,48,.3)':'rgba(255,255,255,.06)'}`, color:showLabels?'#f0a830':'#a89a87' }}>
                 <Music size={12}/> Notas
