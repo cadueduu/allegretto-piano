@@ -595,6 +595,15 @@ export default function PianoMidi() {
   const [composerPlaying,setComposerPlaying]= useState(false);
   const [composerPlayIdx,setComposerPlayIdx]= useState(-1);
   const [composerSaved,  setComposerSaved]  = useState(false);
+  // Follow mode (partitura livre — notas caindo)
+  const [followState,    setFollowState]    = useState('idle'); // idle|countdown|playing|complete
+  const [followCdown,    setFollowCdown]    = useState(null);
+  const [followDispNotes,setFollowDispNotes]= useState([]);
+  const [followScore,    setFollowScore]    = useState(0);
+  const [followCombo,    setFollowCombo]    = useState(0);
+  const [followMaxCombo, setFollowMaxCombo] = useState(0);
+  const [followHits,     setFollowHits]     = useState({ perfect:0, good:0, miss:0 });
+  const [followFeedback, setFollowFeedback] = useState(null);
   const [instrumentId,   setInstrumentId]   = useState('piano');
 
   // Audio refs
@@ -632,6 +641,22 @@ export default function PianoMidi() {
   const composerModeRef       = useRef(false);
   const composerSavedRef      = useRef(false);
   const composerNoteIdRef     = useRef(0);
+  // Follow mode refs
+  const followStateRef    = useRef('idle');
+  const followStartRef    = useRef(0);
+  const followBeatDurRef  = useRef(750);
+  const followFallDurRef  = useRef(2250);
+  const followPendingRef  = useRef([]);
+  const followActiveRef   = useRef([]);
+  const followRafRef      = useRef(null);
+  const followCdownTimers = useRef([]);
+  const followScoreRef    = useRef(0);
+  const followComboRef    = useRef(0);
+  const followMaxComboRef = useRef(0);
+  const followHitsRef     = useRef({ perfect:0, good:0, miss:0 });
+  const followFbTimerRef  = useRef(null);
+  const followTotalMsRef  = useRef(0);
+  const followLoopRef     = useRef(null);
   const composerTimersRef     = useRef([]);
   const composerRailRef       = useRef(null);
 
@@ -803,6 +828,44 @@ export default function PianoMidi() {
       }
     }
 
+    // Follow mode: check timing & pitch
+    if (followStateRef.current === 'playing') {
+      const now     = performance.now();
+      const elapsed = now - followStartRef.current;
+      let best = null, bestDelta = Infinity;
+
+      followActiveRef.current.forEach(note => {
+        if (note.hit || note.noteName !== noteName) return;
+        const delta = Math.abs(elapsed - note.targetTime);
+        if (delta < GOOD_MS && delta < bestDelta) { bestDelta = delta; best = note; }
+      });
+
+      if (best) {
+        const hitType  = bestDelta <= PERFECT_MS ? 'perfect' : 'good';
+        const newCombo = followComboRef.current + 1;
+        const mult     = Math.min(4, Math.floor(newCombo / 10) + 1);
+        const gain     = (hitType === 'perfect' ? 100 : 50) * mult;
+
+        followActiveRef.current = followActiveRef.current.map(n =>
+          n.id === best.id ? { ...n, hit: hitType, hitTime: now } : n
+        );
+        followComboRef.current    = newCombo;
+        if (newCombo > followMaxComboRef.current) followMaxComboRef.current = newCombo;
+        followScoreRef.current   += gain;
+        followHitsRef.current     = { ...followHitsRef.current, [hitType]: followHitsRef.current[hitType] + 1 };
+
+        setFollowScore(followScoreRef.current);
+        setFollowCombo(newCombo);
+        setFollowMaxCombo(followMaxComboRef.current);
+        setFollowHits({ ...followHitsRef.current });
+
+        clearTimeout(followFbTimerRef.current);
+        setFollowFeedback({ type: hitType });
+        followFbTimerRef.current = setTimeout(() => setFollowFeedback(null), 600);
+        return;
+      }
+    }
+
     // Lesson mode advance
     if (!trainingMode && !sheetMode && currentSongRef.current && !songCompleteRef.current) {
       const parsed   = currentSongRef.current.notes.map(parseNote);
@@ -831,7 +894,8 @@ export default function PianoMidi() {
   useEffect(() => { releaseNoteRef.current = releaseNote; }, [releaseNote]);
   useEffect(() => { freeModeRef.current    = freeMode; },    [freeMode]);
   useEffect(() => { composerModeRef.current  = composerMode; }, [composerMode]);
-  useEffect(() => { composerSavedRef.current = composerSaved; }, [composerSaved]);
+  useEffect(() => { composerSavedRef.current = composerSaved;  }, [composerSaved]);
+  useEffect(() => { followStateRef.current   = followState;    }, [followState]);
   useEffect(() => {
     freeModePlayRef.current = (noteName) => {
       if (!freeModeRef.current) return;
@@ -1305,6 +1369,65 @@ export default function PianoMidi() {
   }); // no deps — always fresh
 
   // ---------------------------------------------------------------
+  // Follow mode RAF loop — notas caindo da partitura do compositor
+  // ---------------------------------------------------------------
+  useEffect(() => {
+    followLoopRef.current = () => {
+      const state = followStateRef.current;
+      if (state !== 'playing' && state !== 'countdown') return;
+
+      const now     = performance.now();
+      const elapsed = now - followStartRef.current;
+      const fallDur = followFallDurRef.current;
+
+      const toSpawn = [], stillPending = [];
+      followPendingRef.current.forEach(note => {
+        (elapsed >= note.spawnTime ? toSpawn : stillPending).push(note);
+      });
+      followPendingRef.current = stillPending;
+
+      let missCount = 0;
+      const updated = [...followActiveRef.current, ...toSpawn].map(note => {
+        if (note.hit) {
+          if (now - note.hitTime > 380) return null;
+          return note;
+        }
+        const y = ((elapsed - note.spawnTime) / fallDur) * 100;
+        if (y >= MISS_Y) {
+          missCount++;
+          followHitsRef.current.miss++;
+          followComboRef.current = 0;
+          return { ...note, y: MISS_Y, hit: 'miss', hitTime: now };
+        }
+        return { ...note, y };
+      }).filter(Boolean);
+
+      followActiveRef.current = updated;
+      setFollowDispNotes([...updated]);
+
+      if (missCount > 0) {
+        setFollowCombo(0);
+        setFollowHits({ ...followHitsRef.current });
+        clearTimeout(followFbTimerRef.current);
+        setFollowFeedback({ type: 'miss' });
+        followFbTimerRef.current = setTimeout(() => setFollowFeedback(null), 500);
+      }
+
+      const done = stillPending.length === 0
+        && followPendingRef.current.length === 0
+        && (followActiveRef.current.length === 0 || elapsed > followTotalMsRef.current + followBeatDurRef.current * 4);
+
+      if (done) {
+        followStateRef.current = 'complete';
+        setFollowState('complete');
+        return;
+      }
+
+      followRafRef.current = requestAnimationFrame(() => followLoopRef.current?.());
+    };
+  }); // no deps — always fresh
+
+  // ---------------------------------------------------------------
   // Start training
   // ---------------------------------------------------------------
   const startTraining = useCallback(async () => {
@@ -1461,11 +1584,93 @@ export default function PianoMidi() {
   }, []);
   useEffect(() => { stopSheetRef.current  = stopSheet;  }, [stopSheet]);
 
+  // ---------------------------------------------------------------
+  // Start / stop follow mode
+  // ---------------------------------------------------------------
+  const startFollow = useCallback(async (notes, bpm) => {
+    if (!notes || !notes.length) return;
+    await ensureAudio();
+
+    if (followRafRef.current) cancelAnimationFrame(followRafRef.current);
+    followCdownTimers.current.forEach(clearTimeout);
+    followCdownTimers.current = [];
+
+    const beatDur = 60000 / bpm;
+    const fallDur = FALL_BEATS * beatDur;
+    followBeatDurRef.current = beatDur;
+    followFallDurRef.current = fallDur;
+
+    followScoreRef.current    = 0;
+    followComboRef.current    = 0;
+    followMaxComboRef.current = 0;
+    followHitsRef.current     = { perfect:0, good:0, miss:0 };
+    setFollowScore(0); setFollowCombo(0); setFollowMaxCombo(0);
+    setFollowHits({ perfect:0, good:0, miss:0 });
+    setFollowDispNotes([]); setFollowFeedback(null);
+    followActiveRef.current = [];
+
+    const COUNTDOWN_MS = 3000;
+    followStartRef.current = performance.now() + COUNTDOWN_MS;
+
+    let cumMs = 0;
+    followTotalMsRef.current = notes.reduce((s, n) => s + n.dur * beatDur, 0);
+
+    followPendingRef.current = [];
+    notes.forEach((note, i) => {
+      const targetTime = cumMs;
+      cumMs += note.dur * beatDur;
+      if (note.name === 'rest') return;
+      const layout = getNoteLayout(note.name);
+      const heightPct = Math.max(4, Math.min(18, (note.dur / FALL_BEATS) * 100));
+      followPendingRef.current.push({
+        id: `f${i}-${Date.now()}`,
+        noteName: note.name,
+        dur: note.dur,
+        targetTime,
+        spawnTime: targetTime - fallDur,
+        heightPct,
+        ...layout,
+        y: 0, hit: null, hitTime: null,
+      });
+    });
+
+    followStateRef.current = 'countdown';
+    setFollowState('countdown');
+    setFollowCdown(3);
+
+    const t1 = setTimeout(() => setFollowCdown(2), 1000);
+    const t2 = setTimeout(() => setFollowCdown(1), 2000);
+    const t3 = setTimeout(() => {
+      setFollowCdown(null);
+      followStateRef.current = 'playing';
+      setFollowState('playing');
+    }, COUNTDOWN_MS);
+    followCdownTimers.current = [t1, t2, t3];
+
+    followRafRef.current = requestAnimationFrame(() => followLoopRef.current?.());
+  }, [ensureAudio]);
+
+  const stopFollow = useCallback(() => {
+    if (followRafRef.current) cancelAnimationFrame(followRafRef.current);
+    followCdownTimers.current.forEach(clearTimeout);
+    followCdownTimers.current = [];
+    followStateRef.current = 'idle';
+    setFollowState('idle');
+    setFollowDispNotes([]);
+    setFollowCdown(null);
+    followActiveRef.current = [];
+    followPendingRef.current = [];
+    try { synthRef.current?.releaseAll(); } catch(e) {}
+    setActiveNotes(new Set());
+  }, []);
+
   useEffect(() => () => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (rafRef.current)    cancelAnimationFrame(rafRef.current);
     if (sheetRafRef.current) cancelAnimationFrame(sheetRafRef.current);
+    if (followRafRef.current) cancelAnimationFrame(followRafRef.current);
     countdownTimersRef.current.forEach(clearTimeout);
     sheetCdownTimers.current.forEach(clearTimeout);
+    followCdownTimers.current.forEach(clearTimeout);
     demoTimers.current.forEach(clearTimeout);
   }, []);
 
@@ -2368,14 +2573,21 @@ export default function PianoMidi() {
                 </>
               ) : composerSaved ? (
                 <>
-                  {/* Tocar partitura salva */}
+                  {/* Ouvir partitura salva */}
                   <button onClick={() => composerPlaying ? stopComposer() : playComposer(composerNotes, composerBpm)}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-colors"
                     style={{ background:composerPlaying?'rgba(224,124,94,.15)':'linear-gradient(135deg,#f0a830,#c97e1a)', border:composerPlaying?'1px solid rgba(224,124,94,.35)':'none', color:composerPlaying?'#e07c5e':'#1a1108', fontWeight:600 }}>
-                    {composerPlaying ? <><Square size={11}/> Parar</> : <><Play size={11}/> Tocar</>}
+                    {composerPlaying ? <><Square size={11}/> Parar</> : <><Play size={11}/> Ouvir</>}
+                  </button>
+                  {/* Acompanhar — notas caindo */}
+                  <button
+                    onClick={() => followState !== 'idle' ? stopFollow() : startFollow(composerNotes, composerBpm)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-colors"
+                    style={{ background:followState!=='idle'?'rgba(224,124,94,.15)':'rgba(155,209,126,.18)', border:followState!=='idle'?'1px solid rgba(224,124,94,.35)':'1px solid rgba(155,209,126,.4)', color:followState!=='idle'?'#e07c5e':'#9bd17e', fontWeight:600 }}>
+                    {followState !== 'idle' ? <><X size={11}/> Parar</> : <><Target size={11}/> Acompanhar</>}
                   </button>
                   {/* Editar */}
-                  <button onClick={() => { stopComposer(); setComposerSaved(false); }}
+                  <button onClick={() => { stopComposer(); stopFollow(); setComposerSaved(false); }}
                     className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs transition-colors"
                     style={{ background:'rgba(240,168,48,.08)', border:'1px solid rgba(240,168,48,.2)', color:'#f0a830' }}>
                     <PenLine size={11}/> Editar
@@ -2528,24 +2740,109 @@ export default function PianoMidi() {
             );
           })()}
 
-          {/* ── CANVAS DAS BARRAS — sempre presente ── */}
-          <div ref={risingCanvasRef} className="flex-1 relative overflow-hidden">
-            {risingBars.map(bar => (
-              <div key={bar.id} style={{
-                position:'absolute', bottom:0,
-                left:`${bar.left}%`, width:`${bar.width}%`,
-                height: Math.max(40, bar.height),
-                transform:`translateY(-${bar.floatY}px)`,
-                opacity: bar.opacity,
-                background: bar.color === '#ffffff'
-                  ? 'linear-gradient(0deg,rgba(255,255,255,.15) 0%,rgba(255,255,255,.9) 40%,#ffffff 100%)'
-                  : `linear-gradient(0deg,${bar.color}22 0%,${bar.color}bb 40%,${bar.color} 100%)`,
-                boxShadow: bar.color === '#ffffff'
-                  ? '0 0 18px rgba(255,255,255,.5), 0 0 40px rgba(255,255,255,.15)'
-                  : `0 0 18px ${bar.color}88, 0 0 40px ${bar.color}33`,
-                borderRadius:'3px 3px 0 0',
-              }}/>
-            ))}
+          {/* ── CANVAS — barras livres OU notas caindo (follow mode) ── */}
+          <div ref={risingCanvasRef} className="flex-1 relative overflow-hidden" style={{ background: followState !== 'idle' ? '#0a0706' : undefined }}>
+            {followState !== 'idle' ? (
+              <>
+                {/* Fundo das colunas */}
+                {WHITE_KEYS.map((note,i) => (
+                  <div key={note.name} style={{ position:'absolute', top:0, bottom:0, left:`${(i/WHITE_KEY_COUNT)*100}%`, width:`${WHITE_KEY_WIDTH}%`, background:i%2===0?'rgba(255,255,255,.016)':'rgba(255,255,255,.008)', borderRight:'1px solid rgba(255,255,255,.04)' }}/>
+                ))}
+                {BLACK_KEYS.map(note => (
+                  <div key={note.name} style={{ position:'absolute', top:0, bottom:0, left:`${BLACK_KEY_LEFTS.get(note.name)}%`, width:`${WHITE_KEY_WIDTH*0.6}%`, background:'rgba(0,0,0,.4)', zIndex:1 }}/>
+                ))}
+
+                {/* Blocos de notas caindo */}
+                {followDispNotes.map(note => {
+                  const hitClr = note.hit==='perfect'?'#9bd17e':note.hit==='good'?'#f0d060':note.hit==='miss'?'#e07c5e':null;
+                  const base   = note.isBlack?'#c97e1a':'#f0a830';
+                  const clr    = hitClr || base;
+                  return (
+                    <div key={note.id} style={{
+                      position:'absolute',
+                      left:note.left,
+                      width:note.width,
+                      bottom:`${100-note.y}%`,
+                      height:`${note.heightPct}%`,
+                      background:`linear-gradient(180deg,${clr}ee,${clr}88)`,
+                      borderRadius:'4px 4px 3px 3px',
+                      zIndex:note.isBlack?4:3,
+                      boxShadow:hitClr?`0 0 14px 3px ${clr}80`:`0 2px 6px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.25)`,
+                      opacity:note.hit?(note.hit==='miss'?0.2:0.35):1,
+                      border:`1px solid ${clr}66`,
+                      transition:note.hit?'opacity .25s':undefined,
+                    }}/>
+                  );
+                })}
+
+                {/* Barra de hit zone */}
+                <div className="hz-bar" style={{ position:'absolute', bottom:0, left:0, right:0, height:3, background:'linear-gradient(90deg,transparent,#f0a830 20%,#f0a830 80%,transparent)', zIndex:10 }}/>
+                <div style={{ position:'absolute', bottom:0, left:0, right:0, height:40, background:'linear-gradient(to top,rgba(240,168,48,.07),transparent)', zIndex:9, pointerEvents:'none' }}/>
+
+                {/* Score + combo */}
+                {followState === 'playing' && <>
+                  <div style={{ position:'absolute', top:10, left:12, zIndex:15, fontFamily:'monospace', fontSize:18, fontWeight:700, color:'#f0a830', textShadow:'0 0 12px rgba(240,168,48,.6)' }}>{followScore.toLocaleString()}</div>
+                  {followCombo>=5 && <div style={{ position:'absolute', top:10, right:12, zIndex:15, fontSize:13, fontWeight:700, color:followCombo>=20?'#9bd17e':'#f0a830', textShadow:'0 0 10px currentColor' }}><Zap size={12} style={{ display:'inline', verticalAlign:'middle', marginRight:3 }}/>×{followCombo} combo</div>}
+                </>}
+
+                {/* Feedback de acerto */}
+                {followFeedback && (
+                  <div className="feedback-pop" style={{ fontSize:24, fontWeight:800, letterSpacing:'.06em', color:followFeedback.type==='perfect'?'#9bd17e':followFeedback.type==='good'?'#f0d060':'#e07c5e', textShadow:'0 0 20px currentColor' }}>
+                    {followFeedback.type==='perfect'?'✦ PERFEITO!':followFeedback.type==='good'?'● BOM!':'✕ ERRO'}
+                  </div>
+                )}
+
+                {/* Countdown */}
+                {followState === 'countdown' && followCdown != null && (
+                  <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,.65)', zIndex:20, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                    <div key={followCdown} className="cd-num display-font" style={{ fontSize:100, color:'#f0a830', fontWeight:700, textShadow:'0 0 40px rgba(240,168,48,.9)' }}>{followCdown}</div>
+                  </div>
+                )}
+
+                {/* Resultado final */}
+                {followState === 'complete' && (() => {
+                  const tot = followHits.perfect + followHits.good + followHits.miss;
+                  const acc = tot > 0 ? Math.round(((followHits.perfect + followHits.good) / tot) * 100) : 0;
+                  return (
+                    <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,.78)', zIndex:20, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:16 }}>
+                      <div className="w-16 h-16 rounded-full flex items-center justify-center" style={{ background:acc>=80?'linear-gradient(135deg,#9bd17e,#5a9d3e)':'linear-gradient(135deg,#f0a830,#c97e1a)', boxShadow:'0 8px 28px -6px rgba(155,209,126,.4)' }}>
+                        {acc>=80 ? <Trophy size={28} style={{ color:'#0d2a07' }}/> : <Target size={28} style={{ color:'#1a1108' }}/>}
+                      </div>
+                      <div className="display-font text-2xl celebrate-anim" style={{ color:'#f5efe6' }}>{acc>=95?'Perfeito!':acc>=80?'Muito Bem!':acc>=60?'Bom!':'Continue Praticando!'}</div>
+                      <div className="text-sm" style={{ color:'#8a7d6c' }}>Precisão: {acc}%</div>
+                      <div className="flex gap-5">
+                        {[['Pontos', followScoreRef.current.toLocaleString(), '#f0a830'],['Combo Máx', followMaxCombo, '#9bd17e'],['Perfeitos', followHits.perfect, '#9bd17e'],['Bons', followHits.good, '#f0d060'],['Erros', followHits.miss, '#e07c5e']].map(([label,val,clr]) => (
+                          <div key={label} className="text-center"><div className="text-xl font-bold font-mono" style={{ color:clr }}>{val}</div><div className="text-[10px] uppercase tracking-wider" style={{ color:'#6b6052' }}>{label}</div></div>
+                        ))}
+                      </div>
+                      <button onClick={() => startFollow(composerNotes, composerBpm)}
+                        className="px-5 py-2 rounded-full text-sm flex items-center gap-2 hover:scale-105 transition-all"
+                        style={{ background:'linear-gradient(135deg,#f0a830,#c97e1a)', color:'#1a1108', fontWeight:600 }}>
+                        <RotateCcw size={14}/> Tentar de novo
+                      </button>
+                    </div>
+                  );
+                })()}
+              </>
+            ) : (
+              /* Barras do modo livre */
+              risingBars.map(bar => (
+                <div key={bar.id} style={{
+                  position:'absolute', bottom:0,
+                  left:`${bar.left}%`, width:`${bar.width}%`,
+                  height: Math.max(40, bar.height),
+                  transform:`translateY(-${bar.floatY}px)`,
+                  opacity: bar.opacity,
+                  background: bar.color === '#ffffff'
+                    ? 'linear-gradient(0deg,rgba(255,255,255,.15) 0%,rgba(255,255,255,.9) 40%,#ffffff 100%)'
+                    : `linear-gradient(0deg,${bar.color}22 0%,${bar.color}bb 40%,${bar.color} 100%)`,
+                  boxShadow: bar.color === '#ffffff'
+                    ? '0 0 18px rgba(255,255,255,.5), 0 0 40px rgba(255,255,255,.15)'
+                    : `0 0 18px ${bar.color}88, 0 0 40px ${bar.color}33`,
+                  borderRadius:'3px 3px 0 0',
+                }}/>
+              ))
+            )}
           </div>
 
           {/* Piano */}
