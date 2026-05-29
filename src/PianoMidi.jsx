@@ -594,6 +594,7 @@ export default function PianoMidi() {
   const [composerSelDur, setComposerSelDur] = useState(1);
   const [composerPlaying,setComposerPlaying]= useState(false);
   const [composerPlayIdx,setComposerPlayIdx]= useState(-1);
+  const [composerSaved,  setComposerSaved]  = useState(false);
   const [instrumentId,   setInstrumentId]   = useState('piano');
 
   // Audio refs
@@ -629,6 +630,7 @@ export default function PianoMidi() {
   const createFreeModeBarRef  = useRef(null);
   const releaseFreeModeBarRef = useRef(null);
   const composerModeRef       = useRef(false);
+  const composerSavedRef      = useRef(false);
   const composerNoteIdRef     = useRef(0);
   const composerTimersRef     = useRef([]);
   const composerRailRef       = useRef(null);
@@ -827,12 +829,13 @@ export default function PianoMidi() {
   }, []);
 
   useEffect(() => { releaseNoteRef.current = releaseNote; }, [releaseNote]);
-  useEffect(() => { freeModeRef.current = freeMode; }, [freeMode]);
-  useEffect(() => { composerModeRef.current = composerMode; }, [composerMode]);
+  useEffect(() => { freeModeRef.current    = freeMode; },    [freeMode]);
+  useEffect(() => { composerModeRef.current  = composerMode; }, [composerMode]);
+  useEffect(() => { composerSavedRef.current = composerSaved; }, [composerSaved]);
   useEffect(() => {
     freeModePlayRef.current = (noteName) => {
       if (!freeModeRef.current) return;
-      if (composerModeRef.current) return; // composer mode: no bars/counters
+      if (composerModeRef.current && !composerSavedRef.current) return; // só bloqueia quando editando
       setKeyClickCounts(prev => { const n = new Map(prev); n.set(noteName, (n.get(noteName)||0)+1); return n; });
       const barColor = mpInRoomRef.current ? mpMeRef.current.color : '#ffffff';
       createFreeModeBarRef.current?.(noteName, barColor);
@@ -2315,12 +2318,14 @@ export default function PianoMidi() {
           <div className="flex items-center justify-between px-5 py-3 flex-shrink-0" style={{ borderBottom:'1px solid rgba(255,255,255,.06)' }}>
             <div className="flex items-center gap-3">
               <button onClick={() => {
-                if (composerMode) { stopComposer(); setComposerMode(false); }
+                if (composerMode) { stopComposer(); setComposerSaved(false); setComposerMode(false); }
                 else { setFreeMode(false); if(risingRafRef.current){clearTimeout(risingRafRef.current);risingRafRef.current=null;} risingBarsRef.current=[]; setRisingBars([]); setKeyClickCounts(new Map()); }
               }} className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:scale-105" style={{ background:'rgba(255,255,255,.07)', border:'1px solid rgba(255,255,255,.12)', color:'#a89a87' }}>
                 <X size={14}/>
               </button>
-              <span className="display-font text-xl" style={{ color:'#f5efe6' }}>{composerMode ? 'Criar Partitura' : 'Modo Livre'}</span>
+              <span className="display-font text-xl" style={{ color:'#f5efe6' }}>
+                {composerSaved ? '🎼 Partitura' : composerMode ? 'Criar Partitura' : 'Modo Livre'}
+              </span>
               {!composerMode && mpInRoom && (
                 <span className="text-xs px-2 py-0.5 rounded-full flex items-center gap-1.5" style={{ background:'rgba(155,209,126,.12)', color:'#9bd17e', border:'1px solid rgba(155,209,126,.25)' }}>
                   <span className="w-1.5 h-1.5 rounded-full inline-block animate-ping" style={{background:'#9bd17e'}}/>
@@ -2329,7 +2334,7 @@ export default function PianoMidi() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              {composerMode ? (
+              {composerMode && !composerSaved ? (
                 <>
                   {/* BPM */}
                   <div className="flex items-center gap-1.5" style={{ background:'rgba(255,255,255,.05)', border:'1px solid rgba(255,255,255,.08)', borderRadius:8, padding:'4px 8px' }}>
@@ -2352,6 +2357,29 @@ export default function PianoMidi() {
                   <button onClick={() => { stopComposer(); setComposerNotes([]); }} className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs transition-colors" style={{ background:'rgba(255,255,255,.05)', border:'1px solid rgba(255,255,255,.08)', color:'#6b6052' }}>
                     <Trash2 size={11}/> Limpar
                   </button>
+                  {/* Salvar partitura */}
+                  {composerNotes.length > 0 && (
+                    <button onClick={() => { stopComposer(); setComposerSaved(true); }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-colors"
+                      style={{ background:'rgba(155,209,126,.18)', border:'1px solid rgba(155,209,126,.4)', color:'#9bd17e', fontWeight:600 }}>
+                      <Check size={11}/> Salvar
+                    </button>
+                  )}
+                </>
+              ) : composerSaved ? (
+                <>
+                  {/* Tocar partitura salva */}
+                  <button onClick={() => composerPlaying ? stopComposer() : playComposer(composerNotes, composerBpm)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-colors"
+                    style={{ background:composerPlaying?'rgba(224,124,94,.15)':'linear-gradient(135deg,#f0a830,#c97e1a)', border:composerPlaying?'1px solid rgba(224,124,94,.35)':'none', color:composerPlaying?'#e07c5e':'#1a1108', fontWeight:600 }}>
+                    {composerPlaying ? <><Square size={11}/> Parar</> : <><Play size={11}/> Tocar</>}
+                  </button>
+                  {/* Editar */}
+                  <button onClick={() => { stopComposer(); setComposerSaved(false); }}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs transition-colors"
+                    style={{ background:'rgba(240,168,48,.08)', border:'1px solid rgba(240,168,48,.2)', color:'#f0a830' }}>
+                    <PenLine size={11}/> Editar
+                  </button>
                 </>
               ) : (
                 <>
@@ -2366,103 +2394,103 @@ export default function PianoMidi() {
             </div>
           </div>
 
-          {/* Canvas das barras OU área do compositor */}
-          {composerMode ? (
-            <div className="flex-1 flex flex-col overflow-hidden">
-              {/* Partitura SVG */}
-              <div ref={composerRailRef} className="flex-1 overflow-x-auto" style={{ minHeight:STAFF_SVG_H+16, background:'#0d0a07', borderRadius:'8px 8px 0 0', scrollbarWidth:'thin', scrollbarColor:'rgba(255,255,255,.1) transparent' }}>
-                {composerNotes.length === 0 ? (
-                  <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', width:'100%', height:STAFF_SVG_H+16, color:'#3a2e22', userSelect:'none' }}>
-                    <Music size={36} style={{ opacity:.25, marginBottom:8 }}/>
-                    <p style={{ fontSize:13 }}>Toque as teclas do piano para adicionar notas</p>
-                  </div>
-                ) : (() => {
-                  const [sigNum, sigDen] = composerTimeSig.split('/').map(Number);
-                  const beatsPerMeasure = sigNum * (4 / sigDen);
-                  const PX = 68;
-                  const LEFT = 84;
-                  const SL = STAFF_LINE_SPACING;
-                  const ST = STAFF_TOP;
-                  const lineYs = [ST, ST+SL, ST+SL*2, ST+SL*3, ST+SL*4];
-                  const ledgerBelow  = ST + SL*5;
-                  const ledger1Above = ST - SL;
-                  const ledger2Above = ST - SL*2;
-                  const totalBeats = composerNotes.reduce((s, n) => s + n.dur, 0);
-                  const noteEls = [];
-                  let cum = 0;
-                  let gapAcc = 0;        // px accumulated from bar-line padding
-                  const BARLINE_PAD = 20; // extra px inserted at each bar line
-                  composerNotes.forEach((note, i) => {
-                    const nx  = LEFT + cum * PX + gapAcc;
-                    const isPlay = composerPlayIdx === i;
-                    const isRest = note.name === 'rest';
-                    const clr = isPlay ? '#f0a830' : '#e8dfd0';
-                    const dur = note.dur;
-                    if (!isRest) {
-                      const step   = NOTE_STAFF_STEPS[note.name] ?? 6;
-                      const ny     = ST + (10 - step) * (SL / 2);
-                      const stemDn = step > 6;
-                      const isWhole   = dur >= 3.6;
-                      const isHalf    = !isWhole && dur >= 1.8;
-                      const is16th    = !isWhole && !isHalf && dur < 0.4;
-                      const isEighth  = !isWhole && !isHalf && !is16th && dur < 0.85;
-                      const hasSharp  = note.name.includes('#');
-                      const stemX  = stemDn ? nx - 5.5 : nx + 5.5;
-                      const stemY2 = stemDn ? ny + 30  : ny - 30;
-                      noteEls.push(
-                        <g key={note.id} onClick={() => { if (!composerPlaying) setComposerNotes(p => p.filter(n => n.id !== note.id)); }} style={{ cursor:composerPlaying?'default':'pointer' }}>
-                          <rect x={nx-14} y={Math.min(ny,stemY2)-4} width={28} height={Math.abs(stemY2-ny)+30} fill="transparent"/>
-                          {isPlay && <circle cx={nx} cy={ny} r={14} fill="#f0a830" opacity="0.18"/>}
-                          {step <= 0  && <line x1={nx-10} y1={ledgerBelow}  x2={nx+10} y2={ledgerBelow}  stroke={clr} strokeWidth="1.5"/>}
-                          {step >= 12 && <line x1={nx-10} y1={ledger1Above} x2={nx+10} y2={ledger1Above} stroke={clr} strokeWidth="1.5"/>}
-                          {step >= 14 && <line x1={nx-10} y1={ledger2Above} x2={nx+10} y2={ledger2Above} stroke={clr} strokeWidth="1.5"/>}
-                          {hasSharp && <text x={nx-17} y={ny+5} fill={clr} fontSize="12" fontFamily="serif" style={{pointerEvents:'none'}}>♯</text>}
-                          {isWhole
-                            ? <ellipse cx={nx} cy={ny} rx={7.5} ry={5.5} stroke={clr} strokeWidth="2"   fill="none"/>
-                            : isHalf
-                            ? <ellipse cx={nx} cy={ny} rx={6.5} ry={5}   stroke={clr} strokeWidth="1.8" fill="none"/>
-                            : <ellipse cx={nx} cy={ny} rx={6.5} ry={5}   fill={clr}/>
-                          }
-                          {!composerPlaying && !isPlay && <text x={nx+9} y={ny-9} fill="rgba(224,124,94,0.6)" fontSize="9" fontWeight="bold" style={{pointerEvents:'none'}}>×</text>}
-                          {!isWhole && <line x1={stemX} y1={ny} x2={stemX} y2={stemY2} stroke={clr} strokeWidth="1.5"/>}
-                          {isEighth && (stemDn
-                            ? <path d={`M${stemX},${stemY2} C${stemX+14},${stemY2-8} ${stemX+15},${stemY2-16} ${stemX+2},${stemY2-22}`} stroke={clr} strokeWidth="1.5" fill="none"/>
-                            : <path d={`M${stemX},${stemY2} C${stemX+14},${stemY2+8} ${stemX+15},${stemY2+16} ${stemX+2},${stemY2+22}`} stroke={clr} strokeWidth="1.5" fill="none"/>
-                          )}
-                          {is16th && (stemDn ? <>
-                            <path d={`M${stemX},${stemY2}   C${stemX+14},${stemY2-8}  ${stemX+15},${stemY2-16} ${stemX+2},${stemY2-22}`} stroke={clr} strokeWidth="1.5" fill="none"/>
-                            <path d={`M${stemX},${stemY2-7} C${stemX+14},${stemY2-15} ${stemX+15},${stemY2-23} ${stemX+2},${stemY2-29}`} stroke={clr} strokeWidth="1.5" fill="none"/>
-                          </> : <>
-                            <path d={`M${stemX},${stemY2}   C${stemX+14},${stemY2+8}  ${stemX+15},${stemY2+16} ${stemX+2},${stemY2+22}`} stroke={clr} strokeWidth="1.5" fill="none"/>
-                            <path d={`M${stemX},${stemY2+7} C${stemX+14},${stemY2+15} ${stemX+15},${stemY2+23} ${stemX+2},${stemY2+29}`} stroke={clr} strokeWidth="1.5" fill="none"/>
-                          </>)}
-                        </g>
-                      );
-                    } else {
-                      const rc = isPlay ? '#f0a830' : '#a89a87';
-                      const ry = ST + SL*2;
-                      noteEls.push(
-                        <g key={note.id} onClick={() => { if (!composerPlaying) setComposerNotes(p => p.filter(n => n.id !== note.id)); }} style={{ cursor:composerPlaying?'default':'pointer' }}>
-                          <rect x={nx-12} y={ry-10} width={24} height={28} fill="transparent"/>
-                          {dur >= 3.6 && <rect x={nx-7} y={ST+SL} width={14} height={5} fill={rc}/>}
-                          {dur >= 1.8 && dur < 3.6 && <rect x={nx-7} y={ST+SL*2-5} width={14} height={5} fill={rc}/>}
-                          {dur >= 0.85 && dur < 1.8 && <text x={nx-5} y={ST+SL*2+10} fill={rc} fontSize="20" fontFamily="serif" style={{pointerEvents:'none'}}>𝄽</text>}
-                          {dur >= 0.4  && dur < 0.85 && <text x={nx-4} y={ST+SL*2+8}  fill={rc} fontSize="16" fontFamily="serif" style={{pointerEvents:'none'}}>𝄾</text>}
-                          {dur <  0.4  && <text x={nx-4} y={ST+SL*2+10} fill={rc} fontSize="18" fontFamily="serif" style={{pointerEvents:'none'}}>𝄿</text>}
-                          {!composerPlaying && !isPlay && <text x={nx+11} y={ry-1} fill="rgba(224,124,94,0.6)" fontSize="9" fontWeight="bold" style={{pointerEvents:'none'}}>×</text>}
-                        </g>
-                      );
+          {/* ── PARTITURA: altura fixa no topo, só quando composerMode ── */}
+          {composerMode && (() => {
+            const [sigNum, sigDen] = composerTimeSig.split('/').map(Number);
+            const beatsPerMeasure = sigNum * (4 / sigDen);
+            const PX = 68;
+            const LEFT = 84;
+            const SL = STAFF_LINE_SPACING;
+            const ST = STAFF_TOP;
+            const lineYs = [ST, ST+SL, ST+SL*2, ST+SL*3, ST+SL*4];
+            const ledgerBelow  = ST + SL*5;
+            const ledger1Above = ST - SL;
+            const ledger2Above = ST - SL*2;
+            const totalBeats = composerNotes.reduce((s, n) => s + n.dur, 0);
+            const noteEls = [];
+            let cum = 0;
+            let gapAcc = 0;
+            const BARLINE_PAD = 20;
+            composerNotes.forEach((note, i) => {
+              const nx  = LEFT + cum * PX + gapAcc;
+              const isPlay = composerPlayIdx === i;
+              const isRest = note.name === 'rest';
+              const clr = isPlay ? '#f0a830' : '#e8dfd0';
+              const dur = note.dur;
+              if (!isRest) {
+                const step   = NOTE_STAFF_STEPS[note.name] ?? 6;
+                const ny     = ST + (10 - step) * (SL / 2);
+                const stemDn = step > 6;
+                const isWhole   = dur >= 3.6;
+                const isHalf    = !isWhole && dur >= 1.8;
+                const is16th    = !isWhole && !isHalf && dur < 0.4;
+                const isEighth  = !isWhole && !isHalf && !is16th && dur < 0.85;
+                const hasSharp  = note.name.includes('#');
+                const stemX  = stemDn ? nx - 5.5 : nx + 5.5;
+                const stemY2 = stemDn ? ny + 30  : ny - 30;
+                noteEls.push(
+                  <g key={note.id} onClick={() => { if (!composerPlaying && !composerSaved) setComposerNotes(p => p.filter(n => n.id !== note.id)); }} style={{ cursor:(composerPlaying||composerSaved)?'default':'pointer' }}>
+                    <rect x={nx-14} y={Math.min(ny,stemY2)-4} width={28} height={Math.abs(stemY2-ny)+30} fill="transparent"/>
+                    {isPlay && <circle cx={nx} cy={ny} r={14} fill="#f0a830" opacity="0.18"/>}
+                    {step <= 0  && <line x1={nx-10} y1={ledgerBelow}  x2={nx+10} y2={ledgerBelow}  stroke={clr} strokeWidth="1.5"/>}
+                    {step >= 12 && <line x1={nx-10} y1={ledger1Above} x2={nx+10} y2={ledger1Above} stroke={clr} strokeWidth="1.5"/>}
+                    {step >= 14 && <line x1={nx-10} y1={ledger2Above} x2={nx+10} y2={ledger2Above} stroke={clr} strokeWidth="1.5"/>}
+                    {hasSharp && <text x={nx-17} y={ny+5} fill={clr} fontSize="12" fontFamily="serif" style={{pointerEvents:'none'}}>♯</text>}
+                    {isWhole
+                      ? <ellipse cx={nx} cy={ny} rx={7.5} ry={5.5} stroke={clr} strokeWidth="2"   fill="none"/>
+                      : isHalf
+                      ? <ellipse cx={nx} cy={ny} rx={6.5} ry={5}   stroke={clr} strokeWidth="1.8" fill="none"/>
+                      : <ellipse cx={nx} cy={ny} rx={6.5} ry={5}   fill={clr}/>
                     }
-                    cum += dur;
-                    if (Math.abs(cum % beatsPerMeasure) < 0.01 && i < composerNotes.length - 1) {
-                      // Bar line sits 8px after the beat boundary, leaving ~12px before the next note
-                      const bx = LEFT + cum * PX + gapAcc + 8;
-                      noteEls.push(<line key={`bl-${i}`} x1={bx} y1={ST-4} x2={bx} y2={ST+SL*4+4} stroke="rgba(255,255,255,0.35)" strokeWidth="1.5"/>);
-                      gapAcc += BARLINE_PAD;
-                    }
-                  });
-                  const svgW = Math.max(560, LEFT + totalBeats * PX + gapAcc + 80);
-                  return (
+                    {!composerPlaying && !composerSaved && !isPlay && <text x={nx+9} y={ny-9} fill="rgba(224,124,94,0.6)" fontSize="9" fontWeight="bold" style={{pointerEvents:'none'}}>×</text>}
+                    {!isWhole && <line x1={stemX} y1={ny} x2={stemX} y2={stemY2} stroke={clr} strokeWidth="1.5"/>}
+                    {isEighth && (stemDn
+                      ? <path d={`M${stemX},${stemY2} C${stemX+14},${stemY2-8} ${stemX+15},${stemY2-16} ${stemX+2},${stemY2-22}`} stroke={clr} strokeWidth="1.5" fill="none"/>
+                      : <path d={`M${stemX},${stemY2} C${stemX+14},${stemY2+8} ${stemX+15},${stemY2+16} ${stemX+2},${stemY2+22}`} stroke={clr} strokeWidth="1.5" fill="none"/>
+                    )}
+                    {is16th && (stemDn ? <>
+                      <path d={`M${stemX},${stemY2}   C${stemX+14},${stemY2-8}  ${stemX+15},${stemY2-16} ${stemX+2},${stemY2-22}`} stroke={clr} strokeWidth="1.5" fill="none"/>
+                      <path d={`M${stemX},${stemY2-7} C${stemX+14},${stemY2-15} ${stemX+15},${stemY2-23} ${stemX+2},${stemY2-29}`} stroke={clr} strokeWidth="1.5" fill="none"/>
+                    </> : <>
+                      <path d={`M${stemX},${stemY2}   C${stemX+14},${stemY2+8}  ${stemX+15},${stemY2+16} ${stemX+2},${stemY2+22}`} stroke={clr} strokeWidth="1.5" fill="none"/>
+                      <path d={`M${stemX},${stemY2+7} C${stemX+14},${stemY2+15} ${stemX+15},${stemY2+23} ${stemX+2},${stemY2+29}`} stroke={clr} strokeWidth="1.5" fill="none"/>
+                    </>)}
+                  </g>
+                );
+              } else {
+                const rc = isPlay ? '#f0a830' : '#a89a87';
+                const ry = ST + SL*2;
+                noteEls.push(
+                  <g key={note.id} onClick={() => { if (!composerPlaying && !composerSaved) setComposerNotes(p => p.filter(n => n.id !== note.id)); }} style={{ cursor:(composerPlaying||composerSaved)?'default':'pointer' }}>
+                    <rect x={nx-12} y={ry-10} width={24} height={28} fill="transparent"/>
+                    {dur >= 3.6 && <rect x={nx-7} y={ST+SL} width={14} height={5} fill={rc}/>}
+                    {dur >= 1.8 && dur < 3.6 && <rect x={nx-7} y={ST+SL*2-5} width={14} height={5} fill={rc}/>}
+                    {dur >= 0.85 && dur < 1.8 && <text x={nx-5} y={ST+SL*2+10} fill={rc} fontSize="20" fontFamily="serif" style={{pointerEvents:'none'}}>𝄽</text>}
+                    {dur >= 0.4  && dur < 0.85 && <text x={nx-4} y={ST+SL*2+8}  fill={rc} fontSize="16" fontFamily="serif" style={{pointerEvents:'none'}}>𝄾</text>}
+                    {dur <  0.4  && <text x={nx-4} y={ST+SL*2+10} fill={rc} fontSize="18" fontFamily="serif" style={{pointerEvents:'none'}}>𝄿</text>}
+                    {!composerPlaying && !composerSaved && !isPlay && <text x={nx+11} y={ry-1} fill="rgba(224,124,94,0.6)" fontSize="9" fontWeight="bold" style={{pointerEvents:'none'}}>×</text>}
+                  </g>
+                );
+              }
+              cum += dur;
+              if (Math.abs(cum % beatsPerMeasure) < 0.01 && i < composerNotes.length - 1) {
+                const bx = LEFT + cum * PX + gapAcc + 8;
+                noteEls.push(<line key={`bl-${i}`} x1={bx} y1={ST-4} x2={bx} y2={ST+SL*4+4} stroke="rgba(255,255,255,0.35)" strokeWidth="1.5"/>);
+                gapAcc += BARLINE_PAD;
+              }
+            });
+            const svgW = Math.max(560, LEFT + totalBeats * PX + gapAcc + 80);
+
+            return (
+              <div className="flex-shrink-0" style={{ background:'#0d0a07', borderBottom:'1px solid rgba(255,255,255,.08)' }}>
+                {/* SVG rolável horizontalmente com altura fixa */}
+                <div ref={composerRailRef} style={{ overflowX:'auto', height: STAFF_SVG_H + 16, scrollbarWidth:'thin', scrollbarColor:'rgba(255,255,255,.1) transparent' }}>
+                  {composerNotes.length === 0 ? (
+                    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', width:'100%', height: STAFF_SVG_H + 16, color:'#3a2e22', userSelect:'none' }}>
+                      <Music size={36} style={{ opacity:.25, marginBottom:8 }}/>
+                      <p style={{ fontSize:13 }}>Toque as teclas para adicionar notas</p>
+                    </div>
+                  ) : (
                     <svg width={svgW} height={STAFF_SVG_H+8} style={{ display:'block' }}>
                       {lineYs.map((y, idx) => (
                         <line key={idx} x1={42} y1={y} x2={svgW-14} y2={y} stroke="rgba(255,255,255,0.2)" strokeWidth="1"/>
@@ -2474,49 +2502,51 @@ export default function PianoMidi() {
                       <text x="49" y={ST+SL*3.5+6} fill="rgba(240,168,48,0.65)" fontSize={SL*2} fontFamily="serif" fontWeight="bold" textAnchor="middle" style={{ userSelect:'none', pointerEvents:'none' }}>{sigDen}</text>
                       {noteEls}
                     </svg>
-                  );
-                })()}
+                  )}
+                </div>
+                {/* Seletor de duração — só no modo de edição (não salvo) */}
+                {!composerSaved && (
+                  <div className="flex items-center gap-2 px-4 py-2 overflow-x-auto" style={{ borderTop:'1px solid rgba(255,255,255,.06)', scrollbarWidth:'none' }}>
+                    <span style={{ fontSize:10, color:'#6b6052', flexShrink:0 }}>Duração:</span>
+                    {[{d:4,l:'Semibreve'},{d:2,l:'Mínima'},{d:1,l:'Semínima'},{d:0.5,l:'Colcheia'},{d:0.25,l:'Semicolcheia'}].map(({d,l}) => (
+                      <button key={d} onClick={() => setComposerSelDur(d)}
+                        style={{ flexShrink:0, display:'flex', alignItems:'center', gap:5, padding:'5px 10px', borderRadius:7, fontSize:11, cursor:'pointer',
+                          background:composerSelDur===d?'rgba(240,168,48,.18)':'rgba(255,255,255,.04)',
+                          border:`1px solid ${composerSelDur===d?'rgba(240,168,48,.45)':'rgba(255,255,255,.08)'}`,
+                          color:composerSelDur===d?'#f0a830':'#8a7d6c' }}>
+                        <NoteIcon dur={d} color={composerSelDur===d?'#f0a830':'#6b6052'} size={13}/>{l}
+                      </button>
+                    ))}
+                    <button onClick={() => addComposerNote('rest', composerSelDur)}
+                      style={{ flexShrink:0, display:'flex', alignItems:'center', gap:5, padding:'5px 10px', borderRadius:7, fontSize:11, cursor:'pointer',
+                        background:'rgba(255,255,255,.04)', border:'1px solid rgba(255,255,255,.08)', color:'#8a7d6c' }}>
+                      𝄽 Pausa
+                    </button>
+                  </div>
+                )}
               </div>
+            );
+          })()}
 
-              {/* Seletor de duração */}
-              <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 overflow-x-auto" style={{ borderTop:'1px solid rgba(255,255,255,.06)', scrollbarWidth:'none' }}>
-                <span style={{ fontSize:10, color:'#6b6052', flexShrink:0 }}>Duração:</span>
-                {[{d:4,l:'Semibreve'},{d:2,l:'Mínima'},{d:1,l:'Semínima'},{d:0.5,l:'Colcheia'},{d:0.25,l:'Semicolcheia'}].map(({d,l}) => (
-                  <button key={d} onClick={() => setComposerSelDur(d)}
-                    style={{ flexShrink:0, display:'flex', alignItems:'center', gap:5, padding:'5px 10px', borderRadius:7, fontSize:11, cursor:'pointer',
-                      background:composerSelDur===d?'rgba(240,168,48,.18)':'rgba(255,255,255,.04)',
-                      border:`1px solid ${composerSelDur===d?'rgba(240,168,48,.45)':'rgba(255,255,255,.08)'}`,
-                      color:composerSelDur===d?'#f0a830':'#8a7d6c' }}>
-                    <NoteIcon dur={d} color={composerSelDur===d?'#f0a830':'#6b6052'} size={13}/>{l}
-                  </button>
-                ))}
-                <button onClick={() => addComposerNote('rest', composerSelDur)}
-                  style={{ flexShrink:0, display:'flex', alignItems:'center', gap:5, padding:'5px 10px', borderRadius:7, fontSize:11, cursor:'pointer',
-                    background:'rgba(255,255,255,.04)', border:'1px solid rgba(255,255,255,.08)', color:'#8a7d6c' }}>
-                  𝄽 Pausa
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div ref={risingCanvasRef} className="flex-1 relative overflow-hidden">
-              {risingBars.map(bar => (
-                <div key={bar.id} style={{
-                  position:'absolute', bottom:0,
-                  left:`${bar.left}%`, width:`${bar.width}%`,
-                  height: Math.max(40, bar.height),
-                  transform:`translateY(-${bar.floatY}px)`,
-                  opacity: bar.opacity,
-                  background: bar.color === '#ffffff'
-                    ? 'linear-gradient(0deg,rgba(255,255,255,.15) 0%,rgba(255,255,255,.9) 40%,#ffffff 100%)'
-                    : `linear-gradient(0deg,${bar.color}22 0%,${bar.color}bb 40%,${bar.color} 100%)`,
-                  boxShadow: bar.color === '#ffffff'
-                    ? '0 0 18px rgba(255,255,255,.5), 0 0 40px rgba(255,255,255,.15)'
-                    : `0 0 18px ${bar.color}88, 0 0 40px ${bar.color}33`,
-                  borderRadius:'3px 3px 0 0',
-                }}/>
-              ))}
-            </div>
-          )}
+          {/* ── CANVAS DAS BARRAS — sempre presente ── */}
+          <div ref={risingCanvasRef} className="flex-1 relative overflow-hidden">
+            {risingBars.map(bar => (
+              <div key={bar.id} style={{
+                position:'absolute', bottom:0,
+                left:`${bar.left}%`, width:`${bar.width}%`,
+                height: Math.max(40, bar.height),
+                transform:`translateY(-${bar.floatY}px)`,
+                opacity: bar.opacity,
+                background: bar.color === '#ffffff'
+                  ? 'linear-gradient(0deg,rgba(255,255,255,.15) 0%,rgba(255,255,255,.9) 40%,#ffffff 100%)'
+                  : `linear-gradient(0deg,${bar.color}22 0%,${bar.color}bb 40%,${bar.color} 100%)`,
+                boxShadow: bar.color === '#ffffff'
+                  ? '0 0 18px rgba(255,255,255,.5), 0 0 40px rgba(255,255,255,.15)'
+                  : `0 0 18px ${bar.color}88, 0 0 40px ${bar.color}33`,
+                borderRadius:'3px 3px 0 0',
+              }}/>
+            ))}
+          </div>
 
           {/* Piano */}
           <div className="relative select-none w-full flex-shrink-0" style={{ height:200, background:'#0e0a06' }}>
@@ -2527,17 +2557,18 @@ export default function PianoMidi() {
                 const pressColor = (isActive && mpInRoom) ? mpMeRef.current.color : (remotePressing.length > 0 ? remotePressing[0].color : null);
                 const pressGrad = pressColor ? `linear-gradient(180deg,${lightenColor(pressColor)},${pressColor})` : null;
                 const cnt = keyClickCounts.get(note.name) || 0;
+                const isEditing = composerMode && !composerSaved;
                 return (
                   <button key={note.name}
-                    onPointerDown={composerMode
+                    onPointerDown={isEditing
                       ? (e) => { e.preventDefault(); try{e.currentTarget.setPointerCapture(e.pointerId);}catch{} addComposerNote(note.name, composerSelDur); playNote(note.name); }
                       : handlePianoPointerDown(note.name)}
-                    onPointerUp={composerMode ? () => releaseNote(note.name) : handlePianoPointerEnd}
-                    onPointerCancel={composerMode ? () => releaseNote(note.name) : handlePianoPointerEnd}
-                    onPointerLeave={composerMode ? undefined : handlePianoPointerEnd}
+                    onPointerUp={isEditing ? () => releaseNote(note.name) : handlePianoPointerEnd}
+                    onPointerCancel={isEditing ? () => releaseNote(note.name) : handlePianoPointerEnd}
+                    onPointerLeave={isEditing ? undefined : handlePianoPointerEnd}
                     className="flex-1 relative rounded-b-md key-press-anim flex flex-col items-center justify-end pb-2"
                     style={{ overflow:'visible', background:pressGrad??(isActive?'linear-gradient(180deg,#ffd991,#f0a830)':'linear-gradient(180deg,#f0eade,#d8ceba)'), boxShadow:pressColor?`inset 0 4px 8px rgba(0,0,0,.15),0 0 16px ${pressColor}77`:(isActive?'inset 0 4px 8px rgba(0,0,0,.15)':'0 2px 0 rgba(0,0,0,.5),inset 0 -2px 6px rgba(0,0,0,.1)'), transform:isActive?'translateY(2px)':'translateY(0)', cursor:'pointer', border:'none', touchAction:'none' }}>
-                    {!composerMode && cnt > 0 && <div style={{ position:'absolute', top:5, right:2, background:'rgba(0,0,0,.55)', color:pressColor||'#f0a830', borderRadius:7, fontSize:9, padding:'1px 4px', fontWeight:700, zIndex:10, lineHeight:1.4, pointerEvents:'none' }}>{cnt}</div>}
+                    {!isEditing && cnt > 0 && <div style={{ position:'absolute', top:5, right:2, background:'rgba(0,0,0,.55)', color:pressColor||'#f0a830', borderRadius:7, fontSize:9, padding:'1px 4px', fontWeight:700, zIndex:10, lineHeight:1.4, pointerEvents:'none' }}>{cnt}</div>}
                     <span className="display-font text-xs font-medium pointer-events-none" style={{ color:pressColor?'#fff':(isActive?'#5a3a0a':'#7a6850') }}>{labelLang==='pt'?note.pt:note.en}</span>
                   </button>
                 );
@@ -2549,14 +2580,15 @@ export default function PianoMidi() {
                 const remotePressing = remoteNoteDisplay.get(note.name) || [];
                 const pressColor = (isActive && mpInRoom) ? mpMeRef.current.color : (remotePressing.length > 0 ? remotePressing[0].color : null);
                 const pressGrad = pressColor ? `linear-gradient(180deg,${lightenColor(pressColor)},${pressColor})` : null;
+                const isEditing = composerMode && !composerSaved;
                 return (
                   <button key={note.name}
-                    onPointerDown={composerMode
+                    onPointerDown={isEditing
                       ? (e) => { e.preventDefault(); try{e.currentTarget.setPointerCapture(e.pointerId);}catch{} addComposerNote(note.name, composerSelDur); playNote(note.name); }
                       : handlePianoPointerDown(note.name)}
-                    onPointerUp={composerMode ? () => releaseNote(note.name) : handlePianoPointerEnd}
-                    onPointerCancel={composerMode ? () => releaseNote(note.name) : handlePianoPointerEnd}
-                    onPointerLeave={composerMode ? undefined : handlePianoPointerEnd}
+                    onPointerUp={isEditing ? () => releaseNote(note.name) : handlePianoPointerEnd}
+                    onPointerCancel={isEditing ? () => releaseNote(note.name) : handlePianoPointerEnd}
+                    onPointerLeave={isEditing ? undefined : handlePianoPointerEnd}
                     className="absolute rounded-b-md key-press-anim flex flex-col items-center justify-end pb-1 pointer-events-auto"
                     style={{ left:`${BLACK_KEY_LEFTS.get(note.name)}%`, width:`${WHITE_KEY_WIDTH*.6}%`, height:'62%', top:0, overflow:'visible', background:pressGrad??(isActive?'linear-gradient(180deg,#f0a830,#c97e1a)':'linear-gradient(180deg,#1e1510,#0a0806)'), boxShadow:pressColor?`inset 0 4px 8px rgba(0,0,0,.3),0 0 16px ${pressColor}99`:(isActive?'inset 0 4px 8px rgba(0,0,0,.3)':'0 3px 0 rgba(0,0,0,.8),inset 0 -2px 4px rgba(0,0,0,.6)'), transform:isActive?'translateY(2px)':'translateY(0)', cursor:'pointer', border:'none', zIndex:2, touchAction:'none' }}>
                     <span className="display-font text-[9px] font-medium pointer-events-none" style={{ color:pressColor?'#fff':(isActive?'#1a1108':'#6a5a4a') }}>{labelLang==='pt'?note.pt:note.en}</span>
