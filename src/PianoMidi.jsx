@@ -657,6 +657,10 @@ export default function PianoMidi() {
   const demoTimers          = useRef([]);
 
   // Sheet mode refs
+  const sheetModeRef     = useRef(false);
+  const startSheetRef    = useRef(null);
+  const stopSheetRef     = useRef(null);
+  const mpBroadStateRef  = useRef(null);
   const sheetStateRef    = useRef('idle');
   const sheetStartRef    = useRef(0);
   const sheetBeatDurRef  = useRef(750);
@@ -899,6 +903,18 @@ export default function PianoMidi() {
     };
   }); // no deps — always fresh
 
+  // Broadcast room-level state changes (song, sheet mode) — works host or client
+  useEffect(() => {
+    mpBroadStateRef.current = (msg) => {
+      if (!mpInRoomRef.current) return;
+      if (mpHostRef.current) {
+        mpBroadcastAll(msg);
+      } else {
+        mpConnsRef.current.forEach(({ conn }) => { try { conn.send(msg); } catch(e) {} });
+      }
+    };
+  }); // no deps — always fresh
+
   function mpCreateSynth(peerId) {
     if (mpSynthsRef.current.has(peerId)) return;
     try {
@@ -995,7 +1011,16 @@ export default function PianoMidi() {
         setMpMembers([...mpMembersRef.current]);
         mpCreateSynth(conn.peer);
         mpBroadcastAll({ type: 'member_joined', id: conn.peer, name: msg.name, color: msg.color }, conn.peer);
-        setTimeout(() => mpBroadcastAll({ type: 'members', list: mpMembersRef.current }), 80);
+        setTimeout(() => {
+          mpBroadcastAll({ type: 'members', list: mpMembersRef.current });
+          // Sync current song + sheet mode to the new member
+          if (currentSongRef.current) try { conn.send({ type: 'song_select', songId: currentSongRef.current.id }); } catch(e) {}
+          if (sheetModeRef.current) {
+            try { conn.send({ type: 'sheet_mode', on: true }); } catch(e) {}
+            if (sheetStateRef.current === 'playing' || sheetStateRef.current === 'countdown')
+              try { conn.send({ type: 'sheet_start' }); } catch(e) {}
+          }
+        }, 100);
       } else if (msg.type === 'note_on') {
         mpHandleRemoteNote(conn.peer, msg.note, 'on');
         mpBroadcastAll({ type: 'note_on', from: conn.peer, note: msg.note }, conn.peer);
@@ -1012,6 +1037,20 @@ export default function PianoMidi() {
         });
         setRemoteNoteDisplay(new Map(remoteNotesRef.current));
         mpBroadcastAll({ type: 'color_change', from: conn.peer, color: msg.color }, conn.peer);
+      } else if (msg.type === 'song_select') {
+        const song = SONGS.find(s => s.id === msg.songId);
+        if (song) { setCurrentSong(song); setCurrentNoteIndex(0); setSongComplete(false); stopSheetRef.current?.(); setSheetMode(false); }
+        mpBroadcastAll({ type: 'song_select', songId: msg.songId }, conn.peer);
+      } else if (msg.type === 'sheet_mode') {
+        if (msg.on) { setSheetMode(true); setTrainingMode(false); }
+        else { setSheetMode(false); stopSheetRef.current?.(); }
+        mpBroadcastAll({ type: 'sheet_mode', on: msg.on }, conn.peer);
+      } else if (msg.type === 'sheet_start') {
+        setTimeout(() => startSheetRef.current?.(), 0);
+        mpBroadcastAll({ type: 'sheet_start' }, conn.peer);
+      } else if (msg.type === 'sheet_stop') {
+        stopSheetRef.current?.();
+        mpBroadcastAll({ type: 'sheet_stop' }, conn.peer);
       }
     });
     conn.on('close', () => {
@@ -1092,6 +1131,16 @@ export default function PianoMidi() {
                   remoteNotesRef.current.set(note, list.map(x => x.peerId === msg.from ? { ...x, color: msg.color } : x));
                 });
                 setRemoteNoteDisplay(new Map(remoteNotesRef.current));
+              } else if (msg.type === 'song_select') {
+                const song = SONGS.find(s => s.id === msg.songId);
+                if (song) { setCurrentSong(song); setCurrentNoteIndex(0); setSongComplete(false); stopSheetRef.current?.(); setSheetMode(false); }
+              } else if (msg.type === 'sheet_mode') {
+                if (msg.on) { setSheetMode(true); setTrainingMode(false); }
+                else { setSheetMode(false); stopSheetRef.current?.(); }
+              } else if (msg.type === 'sheet_start') {
+                setTimeout(() => startSheetRef.current?.(), 0);
+              } else if (msg.type === 'sheet_stop') {
+                stopSheetRef.current?.();
               }
           });
           conn.on('close', () => { setMpStatus('Host desconectou.'); leaveRoom(); });
@@ -1197,6 +1246,7 @@ export default function PianoMidi() {
 
   // Sync sheet state ref
   useEffect(() => { sheetStateRef.current = sheetState; }, [sheetState]);
+  useEffect(() => { sheetModeRef.current  = sheetMode;  }, [sheetMode]);
 
   // ---------------------------------------------------------------
   // Sheet music RAF loop — no stale closures pattern
@@ -1392,6 +1442,7 @@ export default function PianoMidi() {
 
     sheetRafRef.current = requestAnimationFrame(() => sheetLoopRef.current?.());
   }, [currentSong, sheetSpeed, ensureAudio]);
+  useEffect(() => { startSheetRef.current = startSheet; }, [startSheet]);
 
   const stopSheet = useCallback(() => {
     if (sheetRafRef.current) cancelAnimationFrame(sheetRafRef.current);
@@ -1405,6 +1456,7 @@ export default function PianoMidi() {
     setSheetCdown(null);
     sheetNotesRef.current = [];
   }, []);
+  useEffect(() => { stopSheetRef.current  = stopSheet;  }, [stopSheet]);
 
   useEffect(() => () => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -1477,7 +1529,11 @@ export default function PianoMidi() {
   // ---------------------------------------------------------------
   // Song controls
   // ---------------------------------------------------------------
-  const selectSong = (song) => { setCurrentSong(song); setCurrentNoteIndex(0); setSongComplete(false); setShowSongList(false); stopTraining(); setTrainingMode(false); stopSheet(); setSheetMode(false); };
+  const selectSong = (song) => {
+    setCurrentSong(song); setCurrentNoteIndex(0); setSongComplete(false); setShowSongList(false);
+    stopTraining(); setTrainingMode(false); stopSheet(); setSheetMode(false);
+    mpBroadStateRef.current?.({ type: 'song_select', songId: song.id });
+  };
   const restartSong = () => { setCurrentNoteIndex(0); setSongComplete(false); };
   const closeSong   = () => { setCurrentSong(null); setCurrentNoteIndex(0); setSongComplete(false); stopTraining(); setTrainingMode(false); stopSheet(); setSheetMode(false); };
 
@@ -1676,7 +1732,7 @@ export default function PianoMidi() {
                   <div className="flex rounded-full overflow-hidden" style={{ border:'1px solid rgba(255,255,255,.1)' }}>
                     <button onClick={() => { setTrainingMode(false); stopTraining(); setSheetMode(false); stopSheet(); }} className="px-3 py-1.5 text-xs font-medium transition-colors" style={{ background:!trainingMode&&!sheetMode?'rgba(240,168,48,.2)':'transparent', color:!trainingMode&&!sheetMode?'#f0a830':'#8a7d6c' }}>🎓 Aprender</button>
                     <button onClick={() => { setTrainingMode(true); setSheetMode(false); stopSheet(); }} className="px-3 py-1.5 text-xs font-medium transition-colors" style={{ background:trainingMode?'rgba(240,168,48,.2)':'transparent', color:trainingMode?'#f0a830':'#8a7d6c' }}>🎮 Treinar</button>
-                    <button onClick={() => { setSheetMode(true); setTrainingMode(false); stopTraining(); }} className="px-3 py-1.5 text-xs font-medium transition-colors" style={{ background:sheetMode?'rgba(240,168,48,.2)':'transparent', color:sheetMode?'#f0a830':'#8a7d6c' }}>🎼 Partitura</button>
+                    <button onClick={() => { setSheetMode(true); setTrainingMode(false); stopTraining(); mpBroadStateRef.current?.({ type: 'sheet_mode', on: true }); }} className="px-3 py-1.5 text-xs font-medium transition-colors" style={{ background:sheetMode?'rgba(240,168,48,.2)':'transparent', color:sheetMode?'#f0a830':'#8a7d6c' }}>🎼 Partitura</button>
                   </div>
 
                   {!trainingMode && !sheetMode && <>
@@ -1721,18 +1777,18 @@ export default function PianoMidi() {
                         <option value={1.0}>Velocidade 100%</option>
                         <option value={1.25}>Velocidade 125%</option>
                       </select>
-                      <button onClick={startSheet} className="px-4 py-2 rounded-full text-sm flex items-center gap-2 transition-all hover:scale-105" style={{ background:'linear-gradient(135deg,#f0a830,#c97e1a)', color:'#1a1108', fontWeight:600, boxShadow:'0 8px 20px -6px rgba(240,168,48,.5)' }}>
+                      <button onClick={async () => { await startSheet(); mpBroadStateRef.current?.({ type: 'sheet_start' }); }} className="px-4 py-2 rounded-full text-sm flex items-center gap-2 transition-all hover:scale-105" style={{ background:'linear-gradient(135deg,#f0a830,#c97e1a)', color:'#1a1108', fontWeight:600, boxShadow:'0 8px 20px -6px rgba(240,168,48,.5)' }}>
                         <Play size={14}/> Tocar
                       </button>
                     </div>
                   )}
                   {sheetMode && (sheetState==='playing'||sheetState==='countdown') && (
-                    <button onClick={stopSheet} className="px-4 py-2 rounded-full text-sm flex items-center gap-2" style={{ background:'rgba(224,124,94,.15)', border:'1px solid rgba(224,124,94,.3)', color:'#e07c5e' }}>
+                    <button onClick={() => { stopSheet(); mpBroadStateRef.current?.({ type: 'sheet_stop' }); }} className="px-4 py-2 rounded-full text-sm flex items-center gap-2" style={{ background:'rgba(224,124,94,.15)', border:'1px solid rgba(224,124,94,.3)', color:'#e07c5e' }}>
                       <X size={14}/> Parar
                     </button>
                   )}
                   {sheetMode && sheetState==='complete' && (
-                    <button onClick={startSheet} className="px-4 py-2 rounded-full text-sm flex items-center gap-2 hover:scale-105 transition-all" style={{ background:'linear-gradient(135deg,#f0a830,#c97e1a)', color:'#1a1108', fontWeight:600 }}>
+                    <button onClick={async () => { await startSheet(); mpBroadStateRef.current?.({ type: 'sheet_start' }); }} className="px-4 py-2 rounded-full text-sm flex items-center gap-2 hover:scale-105 transition-all" style={{ background:'linear-gradient(135deg,#f0a830,#c97e1a)', color:'#1a1108', fontWeight:600 }}>
                       <RotateCcw size={14}/> Tocar de novo
                     </button>
                   )}
